@@ -29,7 +29,8 @@ Official references:
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System boundaries, data flow, backend, persistence, provider adapters | Active |
 | [AI_SYSTEM.md](./AI_SYSTEM.md) | AI student behavior, evaluator, misconception loop, mastery state | Active |
 | [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) | Build order, milestones, dates, definition of done | Active |
-| [DESIGN.md](./DESIGN.md) | UI/UX direction, layout, components, states, accessibility | Active |
+| [DESIGN.md](./DESIGN.md) | UI/UX direction, layout, states, accessibility | Active |
+| [UI_COMPONENTS.md](./UI_COMPONENTS.md) | Component inventory and sourcing/customization plan | Active |
 | [SECURITY.md](./SECURITY.md) | Threat model, prompt injection, auth/RLS, secrets, abuse controls | Active |
 | [TESTING.md](./TESTING.md) | Functional, AI, voice, security, accessibility and E2E tests | Active |
 | [DEMO_PLAN.md](./DEMO_PLAN.md) | 1–3 minute judging demo and submission-readiness checklist | Active |
