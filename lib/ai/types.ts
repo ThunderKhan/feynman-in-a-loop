@@ -68,18 +68,25 @@ export type TurnOutput = {
   };
 };
 
+export type PriorityRule = {
+  id: "binary-search-sorted-invariant";
+  instruction: string;
+};
+
 export type TurnInput = TurnContext & {
   learnerTurnId: string;
   learnerContent: string;
   mode?: "normal" | "retry" | "student_repair";
   retryReason?: string | null;
   fixedEvaluation?: TurnEvaluation | null;
+  priorityRule?: PriorityRule | null;
 };
 
 export type ValidationContext = {
   sessionId: string;
   contextTurns: ContextTurn[];
   existingLedger: EvidenceLedger;
+  priorityRule?: PriorityRule | null;
 };
 
 export type ValidationResult = {
