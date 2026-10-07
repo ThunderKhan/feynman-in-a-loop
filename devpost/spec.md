@@ -122,14 +122,14 @@ Request-in/response-out is one round trip. **No streaming.** Streaming would imp
 | Database + Auth | **Supabase** — `@supabase/ssr` + `@supabase/supabase-js`, Postgres, RLS | One service for identity, persistence, authorization |
 | ORM | **None.** Runtime access via Supabase client; schema/RLS/triggers/functions via SQL migrations | Learner decision: an ORM adds a second database access path and authorization model without value here. Supabase-generated TS types for typing |
 | Schema validation | **Zod** | Runtime validation; also generates the JSON Schema sent to Groq |
-| AI provider (hosted) | **Groq** — `openai/gpt-oss-20b` or `120b`, `strict: true` structured outputs | 30 RPM / 1,000 RPD / 8K TPM / **200K TPD** free tier |
+| AI provider (hosted) | **Groq — `openai/gpt-oss-120b`**, `strict: true` structured outputs | Selected by Slice 3 benchmark; 20B rejected for materially weaker evaluator/structured-output reliability |
 | AI provider (local) | **Ollama** | Dev iteration, corpus runs, adversarial tests |
 | Speech recognition | **Web Speech API** (`SpeechRecognition`), **feature-detected at runtime** | Zero cost, no key. Limited availability; Chrome/Chromium is the tested demo target, **Type instead** is the guaranteed fallback |
 | Deployment | **Vercel** | Per `context.md` |
 
 **Runtime requirements (Next 16):** Node **20.9+**, TypeScript 5.1+. Turbopack is stable and the default.
 
-**Model selection is deferred to a benchmark, not decided here.** Build the adapter, run the 20B-vs-120B reliability benchmark, and pick the smaller/faster model that passes. Use 120B only if 20B is materially less reliable.
+**Model selection resolved (7 Oct 2026): use `openai/gpt-oss-120b`.** The same corpus showed 20B was materially less reliable for the combined evaluator+student role. After adding the server-enforced Binary Search diagnostic-priority contract, the final 120B corpus passed **12/12** in one call per case. The server still validates every result and permits one quota-accounted retry for structured/semantic failure.
 
 **Unverified and flagged.** Groq quota figures come from the learner's check of official docs (2026-10-07) — re-verify, free tiers change often. **200K TPD is the binding constraint**, not the 1,000 RPD. Structured output support with `strict: true` on the chosen model must be confirmed on the first real call; constrained decoding has documented schema restrictions.
 
@@ -150,7 +150,7 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SECRET_KEY=          # SERVER ONLY — never NEXT_PUBLIC_
 GROQ_API_KEY=                 # SERVER ONLY
 AI_PROVIDER=groq              # groq | ollama
-GROQ_MODEL=                   # set after benchmark
+GROQ_MODEL=openai/gpt-oss-120b  # benchmark-selected hosted model
 OLLAMA_BASE_URL=http://localhost:11434   # dev only
 ```
 
@@ -599,7 +599,7 @@ feynman-in-a-loop/
 - **Auth:** `Authorization: Bearer $GROQ_API_KEY` (server only)
 - **Request:** messages + `response_format: { type: 'json_schema', json_schema: { name, schema, strict: true } }`
 - **Response:** assistant content is a JSON string conforming to the schema
-- **Model:** `openai/gpt-oss-20b` or `-120b` — **selected by benchmark**
+- **Model:** `openai/gpt-oss-120b` — **selected by the Slice 3 benchmark**
 - **Limits (free, learner-verified 2026-10-07):** 30 RPM, 1,000 RPD, 8K TPM, **200K TPD**
 - **Docs:** [rate limits](https://console.groq.com/docs/rate-limits) · [structured outputs](https://console.groq.com/docs/structured-outputs)
 - **Cost:** $0
