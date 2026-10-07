@@ -1,21 +1,8 @@
-import type { TurnInput, TurnOutput } from "@/lib/ai/types";
-import { GroqProvider } from "@/lib/ai/providers/groq";
-import { OllamaProvider } from "@/lib/ai/providers/ollama";
+import type { TurnInput, TurnOutput } from "./types";
+import { GroqProvider } from "./providers/groq";
+import { OllamaProvider } from "./providers/ollama";
 
-export class AIProviderError extends Error {
-  constructor(
-    message: string,
-    public readonly code:
-      | "provider_unavailable"
-      | "provider_rejected"
-      | "invalid_provider_response"
-      | "provider_not_configured",
-    public readonly status?: number,
-  ) {
-    super(message);
-    this.name = "AIProviderError";
-  }
-}
+import { AIProviderError } from "./errors";
 
 export interface AIProvider {
   completeTurn(input: TurnInput): Promise<TurnOutput>;
