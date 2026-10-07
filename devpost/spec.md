@@ -610,7 +610,7 @@ feynman-in-a-loop/
 
 ### Supabase — database, auth, RLS
 - **Auth:** email/password via `@supabase/ssr`; `proxy.ts` for token refresh; `getClaims()` for server-side identity
-- **Data access:** publishable key + authenticated session only. **No service-role key.**
+- **Data access:** publishable key + authenticated session for browser/RLS-scoped reads; a server-only Supabase secret key is used only by trusted Next.js evaluator/quota paths and never reaches the browser.
 - **Limits:** free tier ample
 - **Docs:** [SSR clients](https://supabase.com/docs/guides/auth/server-side/nextjs) · [RLS](https://supabase.com/docs/guides/database/postgres/row-level-security)
 - **Cost:** $0
@@ -686,7 +686,7 @@ Slice 3 implementation exposed two database-level details that the earlier spec 
 | Framework | **Next.js 16.x**, `proxy.ts` | Current stable; `middleware` deprecated and slated for removal | Node 20.9+, TS 5.1+ required |
 | Auth | `@supabase/ssr` + `proxy.ts`, `getClaims()` server-side | Supabase's current SSR pattern; signature-validated identity | `getSession()` must never be trusted server-side |
 | Database access | **Supabase client only, no ORM** | RLS stays the single authorization model | No query builder; SQL migrations carry the logic |
-| Service-role key | **Absent** | No operation needs it; it bypasses RLS | Adding it later requires a spec revision |
+| Supabase server secret | **Present, server-only and narrowly scoped** | Browser JWTs cannot safely distinguish trusted evaluator writes from user-forged RPC calls | Elevated credential must never reach browser code; sensitive RPCs re-check ownership |
 | Turn call shape | **One call** returning `evaluation` + `student` separately validated | Zero-dollar budget; latency | Risk of role blending — mitigated by Gate 3 + repair path |
 | Transport | One request, one response, **no streaming** | Matches the no-fake-typing PRD rule | Learner sees Thinking, not incremental text |
 | Provider | **Groq** free tier, `strict: true` | 30 RPM / 1,000 RPD / **200K TPD** | Model roster changes without notice |
@@ -698,7 +698,7 @@ Slice 3 implementation exposed two database-level details that the earlier spec 
 | Quota accounting | **`claim_model_call` before the provider call**, atomic with an in-flight mark | Failures and repair calls consume real provider quota and must count | A claim is spent even when the call fails |
 | Result idempotency | **`responds_to_turn_id`** + partial unique index, enforced in `apply_turn_result` | Covers the lost-response retry: no second call, no second student turn | One more column and one more index |
 | `interaction_type` | **Server-derived from session stage** | A client must not be able to claim a successful correction or transfer answer | Two sources of truth collapse to one |
-| RPC authorization | **`SECURITY INVOKER`**, RLS preserved, no service-role | Functions must not become privileged backdoors | Any future `SECURITY DEFINER` needs explicit review |
+| RPC authorization | Browser-safe create/append use narrow `SECURITY DEFINER`; evaluator/quota RPCs are `SECURITY INVOKER` + server-only `service_role` EXECUTE | Separates user-originated writes from authoritative evaluator state | Elevated server path must verify JWT and re-check row ownership |
 | Context | **Evidence-aware anchor** + active-gap turns + recent + ledger | Preserve evidence, not conversation volume | More selector logic than a sliding window |
 | Evidence | Ledger in JSONB, **grounded on write** | Compress after establishing, never reconstruct from memory | Must be validated hard or it becomes a credit-injection vector |
 | Quota defense | **Persisted per-attempt counter** (authoritative) + in-memory secondary | Serverless instances are stateless | A DB write per turn |
