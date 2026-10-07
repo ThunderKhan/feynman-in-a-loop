@@ -557,15 +557,14 @@ Hosted provider is now intentionally selected:
 - **Groq** is the primary hosted provider for the hackathon PoC.
 - **Ollama** is the local development / emergency fallback.
 - There is no automatic runtime provider failover.
-- The exact Groq GPT-OSS model remains benchmark-driven between
-  `openai/gpt-oss-20b` and `openai/gpt-oss-120b`.
+- The hosted production model is **`openai/gpt-oss-120b`**, selected from the Slice 3 benchmark. GPT-OSS 20B was rejected for insufficient reliability in the combined evaluator+student role.
 - Use one structured model call per learner turn in the normal path.
 - The server validates every structured result before state can change.
 
-Selection rule:
-- benchmark 20B and 120B against the same small corpus;
-- choose 20B if it satisfies the learning/evaluator boundary reliably;
-- move to 120B only if the larger model materially improves the required cases.
+Selection result:
+- GPT-OSS 20B was rejected after materially weaker structured/evaluator reliability;
+- GPT-OSS 120B is locked for the hosted PoC after the final benchmark passed 12/12;
+- the Binary Search demo also uses a server-enforced priority contract for its critical sorted-order prerequisite.
 
 The zero-dollar constraint remains binding.
 
@@ -990,8 +989,7 @@ For the Bolt-style starting code:
 Only genuinely unresolved choices should remain here.
 
 ## Exact Groq model
-Benchmark `openai/gpt-oss-20b` and `openai/gpt-oss-120b` against the same
-learning corpus before locking the production model.
+Resolved: use `openai/gpt-oss-120b` for the hosted PoC. The final benchmark passed 12/12 after server-enforced diagnostic priority was added for the deterministic Binary Search demo.
 
 ## AI response voice
 Optional. Browser speech synthesis may be added only after the input path and
