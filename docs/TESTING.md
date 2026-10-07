@@ -46,10 +46,12 @@ Test topic/transcript/session limits.
 ## 2. Integration tests
 
 ### Supabase
-- create user-owned session;
-- list own sessions;
-- load own turns;
-- update own session;
+- create a user-owned session through the approved RPC;
+- list/read own sessions and turns through RLS;
+- reject direct table mutations from authenticated clients;
+- reject browser invocation of server-only evaluator/quota RPCs;
+- prove the server-only RPC path still enforces row ownership;
+- prove idempotent turn insert, one-live-claim, quota accounting, retry recovery, atomic apply, and completed-attempt immutability;
 - deny cross-user access.
 
 ### AI provider adapter
