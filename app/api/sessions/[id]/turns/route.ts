@@ -3,7 +3,8 @@ import { z } from "zod";
 import { getUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAIProvider, AIProviderError } from "@/lib/ai/provider";
+import { getAIProvider } from "@/lib/ai/provider";
+import { AIProviderError } from "@/lib/ai/errors";
 import { selectTurnContext, type StoredTurn } from "@/lib/ai/context";
 import {
   validateStudentBoundary,
