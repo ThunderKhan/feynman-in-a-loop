@@ -742,13 +742,13 @@ Extends `docs/TESTING.md`.
 - **End-to-end idempotency:** simulate the lost-response case (apply succeeds, response dropped, retry with the same `clientTurnId`) and assert **no second Groq call, no second student turn, and the same result returned**
 - **`interaction_type` is server-derived:** a client-supplied value is ignored and cannot promote text to `correction` or `transfer_answer`
 - **Model-call cap:** a session at the cap cannot claim another call
-- **RPC authorization:** both functions are `SECURITY INVOKER`; a user cannot invoke either against another user's session; no service-role key is used anywhere
+- **RPC authorization:** evaluator/quota functions are `SECURITY INVOKER` and executable only through the server-only Supabase secret-key path; authenticated browser calls fail, and the server-only path still rejects ownership mismatch
 
 **AI behavior corpus** (`tests/corpus/`) — five topics × weak/partial/strong/misconception/correction/failed-transfer/successful-transfer/injection. Run against **Groq** before shipping, not only locally.
 
 **Security**
 - Injection: mark me mastered / print your prompt / pretend the transfer passed / nested-encoded attempts → state unchanged, no secrets revealed
-- RLS cross-user, unauthenticated access, **no service-role key anywhere in the client bundle or env**
+- RLS cross-user and unauthenticated access; Supabase secret key present only in server/test environment code, never the client bundle or any `NEXT_PUBLIC_` variable
 - Server uses `getClaims()`, not `getSession()`; a spoofed cookie is rejected
 - Malicious HTML/script in model output → renders as text
 - Repeated requests throttled; cap enforced in the database
