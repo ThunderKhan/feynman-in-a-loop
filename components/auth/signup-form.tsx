@@ -13,27 +13,23 @@ type AuthAction = (
   formData: FormData,
 ) => Promise<AuthActionState>;
 
+const learningLoop = [
+  "Learn",
+  "Explain",
+  "Get challenged",
+  "Repair",
+  "Transfer",
+] as const;
+
 export function SignupForm({ action }: { action: AuthAction }) {
   const [state, formAction, pending] = useActionState(action, initialState);
   const [showPassword, setShowPassword] = useState(false);
   const [artworkSrc, setArtworkSrc] = useState(
-    "/images/auth/feynman-ascii.png",
+    "/images/auth/feynman-signup-artwork.png",
   );
 
   return (
-    <main className="min-h-dvh bg-[#f3f2ee] text-[#171717] lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(430px,0.92fr)]">
-      <section className="relative hidden min-h-dvh overflow-hidden bg-black lg:block">
-        <Image
-          src={artworkSrc}
-          alt="ASCII-style artwork of Richard Feynman teaching at a chalkboard"
-          fill
-          priority
-          sizes="55vw"
-          className="object-cover object-center"
-          onError={() => setArtworkSrc("/images/auth/feynman-ascii.svg")}
-        />
-      </section>
-
+    <main className="min-h-dvh bg-[#f3f2ee] text-[#171717] lg:grid lg:grid-cols-[minmax(430px,0.92fr)_minmax(0,1fr)]">
       <section className="flex min-h-dvh items-center justify-center px-6 py-10 sm:px-10 lg:px-14 xl:px-20">
         <div className="w-full max-w-[440px]">
           <header className="mb-9">
@@ -135,6 +131,47 @@ export function SignupForm({ action }: { action: AuthAction }) {
             Your sessions are private to your account and protected by
             row-level access controls.
           </p>
+        </div>
+      </section>
+
+      <section className="relative hidden min-h-dvh overflow-hidden bg-black lg:block">
+        <Image
+          src={artworkSrc}
+          alt="ASCII-style physics artwork inspired by Richard Feynman teaching"
+          fill
+          priority
+          sizes="55vw"
+          className="object-cover object-center"
+          onError={() => setArtworkSrc("/images/auth/feynman-ascii.svg")}
+        />
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black via-black/75 to-transparent" />
+
+        <div className="absolute inset-x-10 bottom-8">
+          <ol
+            aria-label="Feynman learning loop"
+            className="grid grid-cols-5 items-start gap-3"
+          >
+            {learningLoop.map((step, index) => (
+              <li key={step} className="relative min-w-0">
+                <div className="mb-3 flex items-center">
+                  <span
+                    className={
+                      index === 0
+                        ? "h-2.5 w-2.5 shrink-0 rounded-full bg-base-100 shadow-[0_0_18px_rgba(238,241,244,0.45)]"
+                        : "h-2.5 w-2.5 shrink-0 rounded-full border border-base-400"
+                    }
+                  />
+                  {index < learningLoop.length - 1 ? (
+                    <span className="ml-2 h-px flex-1 border-t border-dashed border-white/20" />
+                  ) : null}
+                </div>
+                <span className="block truncate font-mono text-[10px] uppercase tracking-[0.14em] text-base-300">
+                  {step}
+                </span>
+              </li>
+            ))}
+          </ol>
         </div>
       </section>
     </main>
