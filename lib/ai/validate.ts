@@ -42,8 +42,6 @@ function normalizeForLeakCheck(value: string) {
 }
 
 export function validateStudentBoundary(output: TurnOutput) {
-  const message = normalizeForLeakCheck(output.student.message);
-
   if (output.student.state !== output.evaluation.studentState) {
     throw new TurnValidationError(
       "Student state contradicts evaluator state.",
@@ -56,6 +54,7 @@ export function validateStudentBoundary(output: TurnOutput) {
   // hidden is the evaluator's *meta-diagnosis* ("your gap is...", "I'm
   // testing whether...", mastery/scoring language, etc.).
   const forbidden = [
+    /^(?:great|nice|perfect|exactly|excellent|good job)\b/i,
     /\bmaster(?:y|ed)?\b/i,
     /\b(?:weak|partial)\b/i,
     /\b(?:score|scoring|confidence)\b/i,
@@ -73,7 +72,17 @@ export function validateStudentBoundary(output: TurnOutput) {
 
   if (forbidden.some((pattern) => pattern.test(output.student.message))) {
     throw new TurnValidationError(
-      "Public student response leaks evaluation or diagnostic framing.",
+      "Public student response leaks evaluation framing or uses disallowed praise.",
+      "boundary",
+    );
+  }
+
+  if (
+    output.evaluation.shouldComplete &&
+    output.student.message.includes("?")
+  ) {
+    throw new TurnValidationError(
+      "A completed attempt must not ask the learner another question.",
       "boundary",
     );
   }
