@@ -127,8 +127,21 @@ export const benchmarkCases: BenchmarkCase[] = [
     },
     score(output) {
       const gap = String(output.evaluation.targetGap ?? "").toLowerCase();
+      const targetsEliminationSoundness =
+        gap.includes("sort") ||
+        gap.includes("order") ||
+        gap.includes("discard") ||
+        gap.includes("eliminat") ||
+        (gap.includes("guarantee") &&
+          (gap.includes("remain") || gap.includes("half") || gap.includes("range")));
+
       return {
-        correctGap: gap.includes("sort") || gap.includes("order"),
+        // The intended concept is the missing justification for safely
+        // eliminating one side. Naming "sorted/order" is ideal, but a probe
+        // such as "why does halving guarantee the target remains?" is also a
+        // correct diagnostic because it forces the learner to supply that
+        // invariant rather than rewarding an implementation detail.
+        correctGap: targetsEliminationSoundness,
         usefulMisconceptionOrProbe:
           ["probe", "misconception", "clarify"].includes(
             output.evaluation.nextAction,
