@@ -1,8 +1,8 @@
-import type { AIProvider } from "@/lib/ai/provider";
-import { AIProviderError } from "@/lib/ai/provider";
-import { buildTurnUserMessage, TURN_SYSTEM_PROMPT } from "@/lib/ai/prompts/turn";
-import { TURN_OUTPUT_JSON_SCHEMA } from "@/lib/ai/schemas/turn";
-import type { TurnInput, TurnOutput } from "@/lib/ai/types";
+import type { AIProvider } from "../provider";
+import { AIProviderError } from "../errors";
+import { buildTurnUserMessage, TURN_SYSTEM_PROMPT } from "../prompts/turn";
+import { TURN_OUTPUT_JSON_SCHEMA } from "../schemas/turn";
+import type { TurnInput, TurnOutput } from "../types";
 
 type OllamaResponse = {
   message?: {
