@@ -75,11 +75,7 @@ test("the counter persists across client instances (serverless-safe)", async () 
     assert.equal(signInErr, null);
     assert.ok(userData.session);
 
-    const { data } = await other
-      .from("learning_sessions")
-      .select("model_calls_used")
-      .eq("id", sid)
-      .single();
+    const { data } = await readSession(other, sid);
     assert.equal(data!.model_calls_used, 1, "counter must live in the database");
   } finally {
     await cleanupSession(alice.client, sid);
