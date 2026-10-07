@@ -9,9 +9,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
  * These run against a REAL Supabase project and cannot be mocked: the database
  * itself is the authorization boundary, so a fake client would test nothing.
  *
- * Requires .env.local with NEXT_PUBLIC_SUPABASE_URL and
- * NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, and both migrations applied via the
- * Supabase SQL Editor.
+ * Requires .env.local with NEXT_PUBLIC_SUPABASE_URL,
+ * NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, and the server-only
+ * SUPABASE_SECRET_KEY, plus both migrations applied via the SQL Editor.
  */
 
 loadEnv({ path: ".env.local" });
@@ -195,8 +195,8 @@ export async function cleanupSession(client: SupabaseClient, sessionId: string) 
  *
  * Only permitted while the attempt is untouched (zero turns, zero consumed
  * calls), so it cannot be used to steal a live claim. This is how the suite
- * tests crash recovery without waiting out the production two-minute window,
- * and it requires no special privilege.
+ * tests crash recovery without waiting out the production two-minute window.
+ * It is invoked through the server-only secret-key path, never by the browser.
  */
 export async function setStaleWindow(
   client: SupabaseClient,
