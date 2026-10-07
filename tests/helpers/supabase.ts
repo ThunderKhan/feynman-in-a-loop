@@ -184,9 +184,15 @@ export async function createSession(client: SupabaseClient, topic: string) {
   return data as string;
 }
 
-/** Owner-only delete, used for test cleanup. */
-export async function cleanupSession(client: SupabaseClient, sessionId: string) {
-  const { error } = await client.rpc("delete_session", { p_session_id: sessionId });
+/**
+ * Test cleanup uses the server-only client. Session deletion is deliberately
+ * not an authenticated product RPC: completed attempts are immutable records.
+ */
+export async function cleanupSession(_client: SupabaseClient, sessionId: string) {
+  const { error } = await adminClient()
+    .from("learning_sessions")
+    .delete()
+    .eq("id", sessionId);
   if (error) throw new Error(`cleanup failed: ${error.message}`);
 }
 
@@ -243,11 +249,31 @@ export async function assertSchemaReady(client: SupabaseClient) {
         `max_model_calls() returned: ${JSON.stringify(data)} (error: ${error?.message ?? "none"})`,
     );
   }
+
+  // Probe the NEW server-only function signature with impossible UUIDs. A
+  // current schema reaches the function and reports "session not found". A
+  // stale schema reports a missing function/signature or permission mismatch.
+  const userId = await verifiedUserId(client);
+  const probe = await adminClient().rpc("claim_model_call", {
+    p_user_id: userId,
+    p_session_id: randomUUID(),
+    p_learner_turn_id: randomUUID(),
+  });
+
+  if (!probe.error || !/session not found/i.test(probe.error.message)) {
+    throw new Error(
+      "Slice 2 schema is stale: server-only claim_model_call(user_id, session_id, turn_id) " +
+        `probe returned ${probe.error?.message ?? "no error"}`,
+    );
+  }
 }
 
-/** Best-effort cleanup of a session created by a test. */
-export async function removeSessionAnyWay(client: SupabaseClient, sessionId: string) {
-  const { error } = await client.rpc("delete_session", { p_session_id: sessionId });
+/** Best-effort server-only cleanup of a session created by a test. */
+export async function removeSessionAnyWay(_client: SupabaseClient, sessionId: string) {
+  const { error } = await adminClient()
+    .from("learning_sessions")
+    .delete()
+    .eq("id", sessionId);
   return { ok: !error, error: error?.message ?? null };
 }
 
