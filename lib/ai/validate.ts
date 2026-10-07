@@ -1,0 +1,158 @@
+import { TurnOutputSchema } from "@/lib/ai/schemas/turn";
+import type {
+  Dimension,
+  EvidenceLedger,
+  TurnOutput,
+  ValidationContext,
+  ValidationResult,
+} from "@/lib/ai/types";
+import {
+  ledgerHasEvidenceForEveryDimension,
+  ledgerHasType,
+  mergeEvidenceLedger,
+  validateEvidenceItems,
+} from "@/lib/ai/evidence";
+
+export class TurnValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly gate: "shape" | "meaning" | "boundary",
+  ) {
+    super(message);
+    this.name = "TurnValidationError";
+  }
+}
+
+const DIMENSIONS: Dimension[] = [
+  "coreIdea",
+  "mechanism",
+  "misconceptionRepair",
+  "transfer",
+];
+
+function normalizeForLeakCheck(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function validateStudentBoundary(output: TurnOutput) {
+  const message = normalizeForLeakCheck(output.student.message);
+  const targetGap = output.evaluation.targetGap
+    ? normalizeForLeakCheck(output.evaluation.targetGap)
+    : null;
+
+  if (output.student.state !== output.evaluation.studentState) {
+    throw new TurnValidationError(
+      "Student state contradicts evaluator state.",
+      "meaning",
+    );
+  }
+
+  if (
+    targetGap &&
+    targetGap.length >= 5 &&
+    (message.includes(targetGap) || targetGap.includes(message))
+  ) {
+    throw new TurnValidationError(
+      "Public student response leaks the private target gap.",
+      "boundary",
+    );
+  }
+
+  const forbidden = [
+    /\bmaster(?:y|ed)?\b/i,
+    /\b(?:weak|partial)\b/i,
+    /\b(?:score|scoring|confidence)\b/i,
+    /i(?:'| a)?m testing whether/i,
+    /let me check if you understand/i,
+    /to assess your/i,
+    /your understanding is/i,
+    /evaluator/i,
+    /system prompt/i,
+    /target gap/i,
+  ];
+
+  if (forbidden.some((pattern) => pattern.test(output.student.message))) {
+    throw new TurnValidationError(
+      "Public student response leaks evaluation or diagnostic framing.",
+      "boundary",
+    );
+  }
+}
+
+function validateMeaning(
+  output: TurnOutput,
+  context: ValidationContext,
+): EvidenceLedger {
+  try {
+    validateEvidenceItems(output.evaluation.evidence, context.contextTurns);
+  } catch (error) {
+    throw new TurnValidationError(
+      error instanceof Error ? error.message : "Invalid evidence.",
+      "meaning",
+    );
+  }
+
+  const merged = mergeEvidenceLedger(
+    context.existingLedger,
+    output.evaluation.evidence,
+  );
+
+  for (const dimension of DIMENSIONS) {
+    const state = output.evaluation.dimensions[dimension];
+    if (state !== "untested" && merged[dimension].length === 0) {
+      throw new TurnValidationError(
+        `${dimension} cannot be credited without grounded evidence.`,
+        "meaning",
+      );
+    }
+  }
+
+  if (output.evaluation.shouldComplete) {
+    if (!ledgerHasEvidenceForEveryDimension(merged)) {
+      throw new TurnValidationError(
+        "Completion requires evidence for all four dimensions.",
+        "meaning",
+      );
+    }
+    if (!ledgerHasType(merged, "correction")) {
+      throw new TurnValidationError(
+        "Completion requires misconception-repair evidence.",
+        "meaning",
+      );
+    }
+    if (!ledgerHasType(merged, "transfer_answer")) {
+      throw new TurnValidationError(
+        "Completion requires transfer evidence.",
+        "meaning",
+      );
+    }
+  }
+
+  return merged;
+}
+
+export function validateTurnOutput(
+  raw: unknown,
+  context: ValidationContext,
+): ValidationResult {
+  const parsed = TurnOutputSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new TurnValidationError(
+      parsed.error.issues
+        .slice(0, 3)
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join("; "),
+      "shape",
+    );
+  }
+
+  const output = parsed.data as TurnOutput;
+  const mergedLedger = validateMeaning(output, context);
+  validateStudentBoundary(output);
+
+  return { output, mergedLedger };
+}
