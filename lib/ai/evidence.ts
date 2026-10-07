@@ -3,8 +3,8 @@ import type {
   Dimension,
   EvidenceItem,
   EvidenceLedger,
-} from "./types";
-import { EMPTY_LEDGER } from "./types";
+} from "./types.ts";
+import { EMPTY_LEDGER } from "./types.ts";
 
 const DIMENSIONS: Dimension[] = [
   "coreIdea",
