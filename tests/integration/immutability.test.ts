@@ -9,6 +9,7 @@ import {
   completeSession,
   readSession,
   readTurns,
+  adminClient,
   type TestUser,
   assertSchemaReady,} from "../helpers/supabase.ts";
 
@@ -21,11 +22,13 @@ await assertSchemaReady(probe.client);
  * A completed attempt is immutable through EVERY database path.
  *
  * Three guards:
- *   1. RLS UPDATE policy refuses a completed session (slice 1)
+ *   1. authenticated clients have no direct table write privileges
  *   2. BEFORE UPDATE trigger refuses any change once completed
  *   3. BEFORE INSERT trigger refuses new turns under a completed parent
  *
- * Plus the RPC-level checks, which must refuse even a legitimate owner.
+ * The trigger tests intentionally use the server-only admin client so they
+ * prove the database invariant itself rather than merely hitting privilege
+ * denial first.
  *
  * SPEC: devpost/spec.md > Database Operations (Immutability)
  */
@@ -55,31 +58,23 @@ test("completing a session freezes its status and stores the result", async () =
   }
 });
 
-test("a completed session cannot be updated by its owner", async () => {
+test("a completed session cannot be updated even through the privileged server path", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
     await completeSession(alice.client, sid);
 
-    // RLS refuses a completed row, which means the row is invisible to this
-    // statement: zero rows updated, no error. Assert the effect, not the error.
-    const { error } = await alice.client
+    // service_role bypasses RLS/table privilege restrictions, so this reaches
+    // the BEFORE UPDATE trigger directly and proves the immutable-row guard.
+    const { error } = await adminClient()
       .from("learning_sessions")
       .update({ topic: "changed" })
       .eq("id", sid);
-    if (error) {
-      // Acceptable: some paths report the rejection instead of filtering.
-    }
+    assert.ok(error, "completed-session UPDATE trigger must reject privileged writes");
+    assert.match(error.message, /immutable/i);
 
     const session = (await readSession(alice.client, sid)).data!;
     assert.equal(session.topic, "Binary Search", "topic must be unchanged");
     assert.equal(session.status, "completed", "session must still be completed");
-
-    // Honest scope note: with only a publishable key, an UPDATE on a completed
-    // row is always stopped by the RLS policy first, so the BEFORE UPDATE
-    // trigger is unreachable from here. It is defence in depth for paths this
-    // app does not use (service role, SQL editor, another integration). The
-    // INSERT trigger IS independently proven below, because INSERT is allowed
-    // by policy and only the trigger can stop it.
   } finally {
     await cleanupSession(alice.client, sid);
   }
@@ -103,17 +98,18 @@ test("a completed session rejects NEW turns through the RPC path", async () => {
   }
 });
 
-test("a completed session rejects a direct PostgREST INSERT into session_turns", async () => {
+test("a completed session rejects INSERT into session_turns even through the privileged server path", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
     await completeSession(alice.client, sid);
 
-    // This is the bypass the trigger exists for: skip our route handler and
-    // our RPCs entirely and write straight to the table.
-    const { data, error } = await alice.client
+    // service_role can insert into the table, so only the completed-parent
+    // trigger can stop this write.
+    const { data, error } = await adminClient()
       .from("session_turns")
       .insert({
         session_id: sid,
+        user_id: alice.userId,
         client_turn_id: crypto.randomUUID(),
         sequence: 99,
         role: "learner",
@@ -124,7 +120,7 @@ test("a completed session rejects a direct PostgREST INSERT into session_turns",
       .select("id")
       .single();
 
-    assert.ok(error, "direct insert under a completed session must be rejected");
+    assert.ok(error, "completed-parent INSERT trigger must reject privileged writes");
     assert.match(error.message, /completed session/i);
     assert.equal(data, null);
 
