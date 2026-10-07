@@ -26,6 +26,11 @@ function arg(name: string) {
 
 const requestedModel = arg("model");
 const requestedCase = arg("case");
+const repeat = Number.parseInt(arg("repeat") ?? "1", 10);
+
+if (!Number.isInteger(repeat) || repeat < 1 || repeat > 5) {
+  throw new Error("--repeat must be an integer from 1 to 5.");
+}
 
 if (
   requestedModel &&
@@ -40,11 +45,13 @@ const models: readonly ModelName[] = requestedModel
   ? [requestedModel as ModelName]
   : ALL_MODELS;
 
-const selectedCases = requestedCase
+const selectedCasesBase = requestedCase
   ? benchmarkCases.filter((item) => item.id === requestedCase)
   : benchmarkCases;
 
-if (requestedCase && selectedCases.length === 0) {
+const selectedCases = Array.from({ length: repeat }, () => selectedCasesBase).flat();
+
+if (requestedCase && selectedCasesBase.length === 0) {
   throw new Error(
     `Unknown benchmark case "${requestedCase}". Use one of: ${benchmarkCases
       .map((item) => item.id)
@@ -131,7 +138,10 @@ for (const model of models) {
       };
 
       caseResults.push({
-        caseId: benchmark.id,
+        caseId:
+          repeat === 1
+            ? benchmark.id
+            : `${benchmark.id}#${Math.floor(index / selectedCasesBase.length) + 1}`,
         valid: Object.values(checks).every(Boolean),
         checks,
         observed: {
@@ -151,7 +161,10 @@ for (const model of models) {
       );
 
       caseResults.push({
-        caseId: benchmark.id,
+        caseId:
+          repeat === 1
+            ? benchmark.id
+            : `${benchmark.id}#${Math.floor(index / selectedCasesBase.length) + 1}`,
         valid: false,
         checks,
         observed: null,
