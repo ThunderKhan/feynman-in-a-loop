@@ -81,8 +81,7 @@ type CaseResult = {
 const report: Record<string, { score: number; total: number; cases: CaseResult[] }> = {};
 
 for (const model of models) {
-  process.env.GROQ_MODEL = model;
-  const provider = new GroqProvider();
+  const provider = new GroqProvider(model);
   const caseResults: CaseResult[] = [];
 
   for (let index = 0; index < selectedCases.length; index++) {
