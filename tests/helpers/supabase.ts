@@ -260,7 +260,7 @@ export async function assertSchemaReady(client: SupabaseClient) {
     );
   }
 
-  const columnProbe = await client
+  const columnProbe = await adminClient()
     .from("learning_sessions")
     .select("active_target_gap")
     .limit(1);
@@ -408,22 +408,31 @@ export async function completeSession(
   });
 }
 
-/** Reads a session row as the given user. */
+/**
+ * Reads full authoritative session state through the same trusted-server
+ * pattern used by the turn route: verify the user's JWT, then apply ownership
+ * explicitly while using the server-only key. Browser clients intentionally
+ * cannot SELECT evaluator/quota columns directly.
+ */
 export async function readSession(client: SupabaseClient, sessionId: string) {
-  const { data, error } = await client
+  const userId = await verifiedUserId(client);
+  const { data, error } = await adminClient()
     .from("learning_sessions")
     .select("*")
     .eq("id", sessionId)
+    .eq("user_id", userId)
     .maybeSingle();
   return { data, error };
 }
 
-/** Reads turns for a session as the given user. */
+/** Full authoritative turn read for integration assertions. */
 export async function readTurns(client: SupabaseClient, sessionId: string) {
-  const { data, error } = await client
+  const userId = await verifiedUserId(client);
+  const { data, error } = await adminClient()
     .from("session_turns")
     .select("*")
     .eq("session_id", sessionId)
+    .eq("user_id", userId)
     .order("sequence", { ascending: true });
   return { data: data ?? [], error };
 }
