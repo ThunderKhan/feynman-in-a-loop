@@ -226,7 +226,7 @@ Zero-cost provider or local/browser approach selected after testing.
 
 ## Remaining architecture decisions
 
-- Groq model choice: GPT-OSS 20B vs 120B, decided by Slice 3 benchmark.
+- Groq model choice resolved: **GPT-OSS 120B**. 20B was rejected by the Slice 3 benchmark; Binary Search's critical sorted-order prerequisite is protected by a server-enforced diagnostic priority contract.
 - Whether student output gains TTS later (not required for PoC).
 - Whether browser recognition needs any demo-specific caveats beyond the typed fallback.
 - Best-effort per-user/IP abuse limiting beyond the authoritative per-attempt database cap.
