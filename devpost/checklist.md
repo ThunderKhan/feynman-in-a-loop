@@ -15,7 +15,7 @@ Build mode: **fast** — chosen 7 Oct 2026. Explain architectural choices, secur
 
 ## Slices
 
-- [ ] **1. Sign in, start a session, see it listed**
+- [x] **1. Sign in, start a session, see it listed**
   Becomes usable: A running app. You can sign up with email/password, sign in, type a topic, press **Start teaching**, and see the attempt appear in the sidebar and load a teaching room showing the Student Orb in `ready`.
   Why now: Bootstrapping lives inside the first usable slice, not as its own step. It also proves the spec's highest-uncertainty infrastructure assumption — Supabase SSR with `proxy.ts` and cookie-based auth — before any learning logic depends on it.
   PRD ref: `prd.md > The Core Journey` (steps 1–4)
@@ -113,3 +113,8 @@ Reflection:
 Activity mode:
 
 ## Revisions
+
+- **`cacheComponents` and `partialPrefetching` disabled** (Next 16 scaffold default) — every page in this app is auth-dependent and therefore inherently dynamic (`cookies()`, `getClaims()`), and forcing partial prerendering around that adds Suspense ceremony with no benefit at PoC scale. Also forced by the framework: `partialPrefetching` errors out if `cacheComponents` is off. Re-enable later if caching becomes a real need.
+- **`getClaims()` returns a decoded JWT, not a user record** — the spec assumed `{ user }` would be available. Identity is therefore derived from the verified `sub` claim via `lib/auth.ts`. Signature validation is unaffected; this is strictly the documented security posture.
+- **Server Actions used for auth and session creation** instead of dedicated API routes. Same trust boundary (they run server-side), fewer files, progressive enhancement for free. The turn endpoint in slice 3 remains a route handler because it needs custom request/response control.
+- **Supabase placeholders cannot be executed here** — the migration has not been applied against a real project, so the signup → create session → teaching room path is unverified. Tracked as a live follow-up, not assumed passing.
