@@ -8,9 +8,9 @@ Instead of using AI as the tutor, the learner becomes the teacher. The AI behave
 
 ## Status
 
-**Planning / pre-implementation.**
+**Implementation in progress.**
 
-The product direction is locked, but the application has not been initialized yet. Exact zero-cost AI and voice providers are still being tested.
+Scope, PRD, and technical spec are approved. Slice 1 (Next.js + Supabase auth/session shell) is live-verified; Slice 2 is implementing and verifying the database invariants before the AI kernel is wired in. Groq is the selected hosted AI provider, with the exact GPT-OSS model still determined by the Slice 3 benchmark.
 
 ## Core loop
 
@@ -48,15 +48,16 @@ Start with:
 
 ## Current technical direction
 
-- Next.js
-- React
+- Next.js 16
+- React 19
 - TypeScript
-- Tailwind CSS
+- Tailwind CSS v4
 - shadcn/ui
 - Supabase Auth
 - Supabase PostgreSQL + Row Level Security
 - Vercel
-- zero-dollar AI/voice path to be selected through testing
+- Groq free tier for hosted AI; Ollama for local development
+- Web Speech API as the planned voice path, with typed fallback
 
 ## Hackathon planning documents
 
