@@ -3,7 +3,7 @@ import type {
   MasteryDimensions,
   Stage,
   StudentState,
-} from "@/lib/types";
+} from "../types";
 
 export type Dimension =
   | "coreIdea"
