@@ -27,7 +27,7 @@ export class GroqProvider implements AIProvider {
       );
     }
 
-    const model = process.env.GROQ_MODEL ?? "openai/gpt-oss-20b";
+    const model = process.env.GROQ_MODEL ?? "openai/gpt-oss-120b";
     let response: Response;
 
     try {
