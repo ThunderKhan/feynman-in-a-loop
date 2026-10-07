@@ -22,7 +22,7 @@
 --   * create_session / delete_session / append_learner_turn are the only
 --     authenticated mutation RPCs; they derive identity from auth.uid().
 --   * claim/release/apply and the stale-window test hook are executable only
---     by service_role (the server-only Supabase secret key path) and take the
+--     by service_role (the server-only Supabase secret-key path) and take the
 --     already-verified user id explicitly.
 --   * RLS stays enabled for defence in depth on the read path.
 --
@@ -135,9 +135,8 @@ drop index if exists public.session_turns_session_idx;
 create index session_turns_session_idx
   on public.session_turns (session_id, sequence);
 
--- At most one learner evaluation may be in-flight per session. If a second
--- claim races in, the unique violation rolls the whole claim transaction back,
--- including the quota increment.
+-- At most one learner evaluation may be in-flight per session. A concurrent
+-- second claim fails atomically and rolls its quota increment back.
 drop index if exists public.session_turns_one_live_claim_uidx;
 create unique index session_turns_one_live_claim_uidx
   on public.session_turns (session_id)
@@ -241,15 +240,12 @@ create trigger session_turns_reject_completed_parent
 create or replace function public.max_model_calls()
 returns integer
 language sql stable security invoker set search_path = ''
-as $ select 8; $;
+as $$ select 8; $$;
 
--- Read-only helper used by diagnostics/tests. The authoritative per-session
--- value lives in learning_sessions.claim_stale_after_seconds; this exposes the
--- production default without granting any mutation capability.
 create or replace function public.claim_stale_after()
 returns interval
 language sql stable security invoker set search_path = ''
-as $ select make_interval(secs => 120); $;
+as $$ select make_interval(secs => 120); $$;
 
 -- ===========================================================================
 -- MUTATION RPCs
@@ -260,8 +256,7 @@ as $ select make_interval(secs => 120); $;
 --
 -- Evaluator/quota RPCs (set stale window, claim, release, apply) are
 -- SECURITY INVOKER and executable only by service_role. The Next.js server
--- verifies the user's JWT first, then passes that verified user id. A browser
--- session cannot call these functions directly.
+-- verifies the user's JWT first, then passes that verified user id.
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
@@ -336,9 +331,8 @@ begin
 end;
 $$;
 
--- Remove legacy development signatures that were client-callable before the
--- server-only evaluator boundary was made explicit. This keeps reruns from
--- leaving an insecure overload behind.
+-- Remove legacy client-callable development signatures so reruns cannot leave
+-- an insecure overload behind.
 drop function if exists public.set_claim_stale_after(uuid, integer);
 drop function if exists public.claim_model_call(uuid, uuid);
 drop function if exists public.release_model_call(uuid, uuid);
@@ -347,12 +341,7 @@ drop function if exists public.apply_turn_result(uuid, uuid, text, text, text, t
 -- ---------------------------------------------------------------------------
 -- set_claim_stale_after
 --
--- Per-session override for the stale-claim window, used by the integration
--- suite to exercise crash recovery without a two-minute wait.
---
--- Provably safe in production: it can only be set while the attempt is
--- untouched — zero turns and zero consumed calls. It therefore cannot be used
--- to shorten the window on a live evaluation and steal its claim.
+-- Test/development hook for stale-claim recovery. Server-only.
 -- ---------------------------------------------------------------------------
 create or replace function public.set_claim_stale_after(
   p_user_id    uuid,
@@ -363,7 +352,7 @@ returns integer
 language plpgsql
 security invoker
 set search_path = ''
-as $
+as $$
 declare
   v_session public.learning_sessions%rowtype;
   v_turn_count integer;
@@ -393,7 +382,6 @@ begin
     raise exception 'session is completed' using errcode = 'check_violation';
   end if;
 
-  -- Only before any evaluation has started.
   if v_session.model_calls_used <> 0 then
     raise exception 'stale window can only be set before evaluation begins'
       using errcode = 'check_violation';
@@ -433,10 +421,11 @@ create or replace function public.append_learner_turn(
 )
 returns uuid
 language plpgsql
-security invoker
+security definer
 set search_path = ''
-as $
+as $$
 declare
+  v_user uuid := auth.uid();
   v_session public.learning_sessions%rowtype;
   v_existing uuid;
   v_turn_id uuid;
@@ -458,7 +447,7 @@ begin
     raise exception 'session not found' using errcode = 'no_data_found';
   end if;
 
-  if v_session.user_id <> p_user_id then
+  if v_session.user_id <> v_user then
     raise exception 'not your session' using errcode = 'insufficient_privilege';
   end if;
 
@@ -515,13 +504,7 @@ $$;
 -- ---------------------------------------------------------------------------
 -- claim_model_call
 --
--- Consumes quota BEFORE the provider is contacted. Every provider invocation
--- counts — the primary call, semantic retries, and exceptional repair calls
--- alike. A failed call stays consumed, because it really did consume quota.
---
--- A turn is claimable when pending, or when claimed longer ago than the
--- session's stale window (abandoned by a dead process). 'applied' matches
--- neither, so a finished evaluation is never re-run.
+-- Server-only. Consumes quota BEFORE the provider is contacted.
 -- ---------------------------------------------------------------------------
 create or replace function public.claim_model_call(
   p_user_id         uuid,
@@ -532,7 +515,7 @@ returns boolean
 language plpgsql
 security invoker
 set search_path = ''
-as $
+as $$
 declare
   v_max integer := public.max_model_calls();
   v_session public.learning_sessions%rowtype;
@@ -560,8 +543,6 @@ begin
       using errcode = 'check_violation';
   end if;
 
-  -- Charge the allowance. plpgsql is transactional, so any exception below
-  -- rolls this increment back: no claim is recorded unless all checks pass.
   update public.learning_sessions s
      set model_calls_used = s.model_calls_used + 1
    where s.id = p_session_id
@@ -572,7 +553,7 @@ begin
   get diagnostics v_updated = row_count;
 
   if v_updated = 0 then
-    raise exception 'model call not permitted: not owner, session not in progress, or cap reached'
+    raise exception 'model call not permitted: session not in progress or cap reached'
       using errcode = 'check_violation';
   end if;
 
@@ -583,13 +564,14 @@ begin
          evaluation_claimed_at = now()
    where t.id = p_learner_turn_id
      and t.session_id = p_session_id
+     and t.user_id = p_user_id
      and t.role = 'learner'
      and (
-          t.evaluation_state = 'pending'
-          or (
-            t.evaluation_state = 'claimed'
-            and t.evaluation_claimed_at < now() - v_stale
-          )
+       t.evaluation_state = 'pending'
+       or (
+         t.evaluation_state = 'claimed'
+         and t.evaluation_claimed_at < now() - v_stale
+       )
      );
 
   get diagnostics v_updated = row_count;
@@ -606,11 +588,8 @@ $$;
 -- ---------------------------------------------------------------------------
 -- release_model_call
 --
--- Returns a claimed learner turn to 'pending' so Try again can resume it.
---
--- The consumed allowance is deliberately NOT refunded: a provider call was
--- genuinely made and genuinely spent quota. Retrying therefore performs a
--- fresh claim and consumes a further allowance.
+-- Server-only. Returns a claimed learner turn to pending without refunding the
+-- consumed allowance.
 -- ---------------------------------------------------------------------------
 create or replace function public.release_model_call(
   p_user_id         uuid,
@@ -621,7 +600,7 @@ returns boolean
 language plpgsql
 security invoker
 set search_path = ''
-as $
+as $$
 declare
   v_session public.learning_sessions%rowtype;
   v_updated integer;
@@ -648,13 +627,12 @@ begin
       using errcode = 'check_violation';
   end if;
 
-  -- Only a claimed turn can be released. An 'applied' turn is a finished
-  -- evaluation and is never returned to the queue.
   update public.session_turns t
      set evaluation_state = 'pending',
          evaluation_claimed_at = null
    where t.id = p_learner_turn_id
      and t.session_id = p_session_id
+     and t.user_id = p_user_id
      and t.role = 'learner'
      and t.evaluation_state = 'claimed';
 
@@ -672,13 +650,7 @@ $$;
 -- ---------------------------------------------------------------------------
 -- apply_turn_result
 --
--- Atomic: verify the session is still in_progress, verify this learner turn
--- has been claimed and has no applied response, insert the linked student
--- turn, update evaluator state, optionally complete.
---
--- Returns ONLY a sanitized public projection. The private evaluator state
--- stays in the session row; the client never receives mastery, ledger, or
--- target gap.
+-- Server-only atomic apply. The browser has no EXECUTE privilege.
 -- ---------------------------------------------------------------------------
 create or replace function public.apply_turn_result(
   p_user_id           uuid,
@@ -695,11 +667,10 @@ create or replace function public.apply_turn_result(
 )
 returns jsonb
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 declare
-  v_user uuid := auth.uid();
   v_session public.learning_sessions%rowtype;
   v_sequence integer;
   v_state text;
@@ -711,13 +682,13 @@ begin
   select * into v_session
     from public.learning_sessions s
    where s.id = p_session_id
-     for update;
+   for update;
 
   if not found then
     raise exception 'session not found' using errcode = 'no_data_found';
   end if;
 
-  if v_session.user_id <> v_user then
+  if v_session.user_id <> p_user_id then
     raise exception 'not your session' using errcode = 'insufficient_privilege';
   end if;
 
@@ -730,6 +701,7 @@ begin
     from public.session_turns t
    where t.id = p_learner_turn_id
      and t.session_id = p_session_id
+     and t.user_id = p_user_id
      and t.role = 'learner';
 
   if v_state is null then
@@ -737,15 +709,11 @@ begin
       using errcode = 'no_data_found';
   end if;
 
-  -- An applied turn is a finished evaluation and is never re-run.
   if v_state = 'applied' then
     raise exception 'learner turn already has an applied response'
       using errcode = 'unique_violation';
   end if;
 
-  -- A result may only be applied to a turn that actually consumed allowance.
-  -- This keeps "claim before the provider" from being bypassed by applying
-  -- straight from 'pending', which would cost no quota at all.
   if v_state <> 'claimed' then
     raise exception 'learner turn must be claimed before a result is applied'
       using errcode = 'check_violation';
@@ -760,12 +728,13 @@ begin
     interaction_type, source, content
   ) values (
     p_session_id, p_user_id, p_learner_turn_id, v_sequence, 'student',
-    p_interaction_type, 'voice', p_message
+    p_interaction_type, 'typed', p_message
   );
 
   update public.session_turns t
      set evaluation_state = 'applied'
-   where t.id = p_learner_turn_id;
+   where t.id = p_learner_turn_id
+     and t.user_id = p_user_id;
 
   update public.learning_sessions s
      set stage            = p_stage,
@@ -775,7 +744,8 @@ begin
          status           = case when p_complete then 'completed' else s.status end,
          mastery_result   = case when p_complete then p_mastery_result else s.mastery_result end,
          completed_at     = case when p_complete then now() else s.completed_at end
-   where s.id = p_session_id;
+   where s.id = p_session_id
+     and s.user_id = p_user_id;
 
   return jsonb_build_object(
     'publicStage', p_stage,
@@ -789,11 +759,6 @@ $$;
 
 -- ---------------------------------------------------------------------------
 -- Grants
---
--- PUBLIC/anon get no mutation RPCs.
--- authenticated may create/delete sessions and append its own learner turns.
--- Evaluator/quota mutations are server-only: service_role must be used after
--- the Next.js server verifies the user's JWT and supplies p_user_id.
 -- ---------------------------------------------------------------------------
 revoke execute on function public.create_session(text) from public, anon;
 revoke execute on function public.delete_session(uuid) from public, anon;
