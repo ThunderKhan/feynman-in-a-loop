@@ -5,6 +5,7 @@ import {
   validateTurnOutput,
 } from "../lib/ai/validate.ts";
 import { isRetryableStructuredOutputError } from "../lib/ai/errors.ts";
+import { derivePriorityRule } from "../lib/ai/priority.ts";
 import { benchmarkCases } from "../tests/corpus/benchmark-cases.ts";
 
 loadEnv({ path: ".env.local" });
@@ -90,6 +91,15 @@ for (const model of models) {
 
     let attempts = 0;
     let firstFailure: string | null = null;
+    const priorityRule = derivePriorityRule({
+      topic: benchmark.input.topic,
+      currentStage: benchmark.input.currentStage,
+      learnerContent: benchmark.input.learnerContent,
+    });
+    const validationContext = {
+      ...benchmark.validation,
+      priorityRule,
+    };
 
     try {
       let validated: ReturnType<typeof validateTurnOutput> | null = null;
@@ -98,16 +108,17 @@ for (const model of models) {
         attempts = attempt;
         const input =
           attempt === 1
-            ? benchmark.input
+            ? { ...benchmark.input, priorityRule }
             : {
                 ...benchmark.input,
+                priorityRule,
                 mode: "retry" as const,
                 retryReason: firstFailure,
               };
 
         try {
           const raw = await provider.completeTurn(input);
-          validated = validateTurnOutput(raw, benchmark.validation);
+          validated = validateTurnOutput(raw, validationContext);
           break;
         } catch (error) {
           const retryable =
