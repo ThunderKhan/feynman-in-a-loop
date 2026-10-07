@@ -22,14 +22,13 @@ flowchart LR
   U[User] --> UI[Next.js Web App]
   UI --> V[Voice Adapter]
   V --> T[Transcript]
-  T --> API[Server AI Route]
-  API --> S[AI Student]
-  API --> E[Learning Evaluator]
-  S --> API
-  E --> API
-  API --> UI
-  UI --> DB[(Supabase Postgres)]
+  T --> API[Server Turn Route]
+  API --> M[AI Provider: Student + Evaluator]
+  M --> API
+  API --> DB[(Supabase Postgres)]
   UI --> A[Supabase Auth]
+  UI -->|RLS-scoped reads| DB
+  API -->|server-only evaluator/quota RPCs| DB
   DB --> RLS[Row Level Security]
 ```
 
@@ -75,9 +74,9 @@ Responsibilities:
 - session metadata;
 - interaction turns/transcripts;
 - mastery/evaluation state;
-- lightweight profile metadata.
+- quota/claim lifecycle.
 
-Use RLS on exposed user-owned tables.
+There is no custom profile table in the PoC. Browser reads are RLS-scoped. Direct table writes are revoked from authenticated clients; mutations go through narrow RPCs, with evaluator/quota RPCs restricted to the trusted server.
 
 ### Voice adapter
 Exact implementation is open.
@@ -106,31 +105,22 @@ Conceptual interface:
 
 ```ts
 interface AIProvider {
-  studentTurn(input: StudentTurnInput): Promise<StudentTurnOutput>
-  evaluate(input: EvaluationInput): Promise<EvaluationOutput>
+  completeTurn(input: TurnInput): Promise<TurnOutput>
 }
 ```
 
-A single underlying model may implement both roles using different system instructions.
+One model call returns two schema-separated regions: private evaluator state and the public student response. The server validates both and exposes only the public projection.
 
 ## Data flow — teaching turn
 
 1. User starts voice input.
 2. Speech adapter emits transcript.
-3. Transcript is added to current session state.
-4. Server receives learner turn plus bounded session context.
-5. Evaluator identifies:
-   - understood concepts;
-   - unresolved gaps;
-   - candidate misconception/challenge;
-   - whether to move to transfer.
-6. Student role generates the learner-facing response constrained by evaluator intent.
-7. Server validates structured state.
-8. UI updates:
-   - student response;
-   - Student Orb state;
-   - mastery dimensions.
-9. Valid turn/state is persisted.
+3. Completed learner turn is persisted before any model call.
+4. Server verifies the user, atomically claims model quota, and builds bounded evidence-aware context.
+5. One model request returns private evaluator state plus a short public student response.
+6. Server validates schema, evidence grounding, state transition legality, and the public/private boundary.
+7. Valid evaluator state + linked student response are applied atomically through a server-only database RPC.
+8. UI receives only the sanitized student response and public stage.
 
 ## Data flow — completion
 
@@ -142,60 +132,33 @@ A single underlying model may implement both roles using different system instru
 6. Final result is persisted.
 7. Sidebar/history updates.
 
-## Suggested data model
-
-### profiles
-- `id uuid primary key references auth.users`
-- `display_name text`
-- `avatar_url text nullable`
-- `created_at timestamptz`
+## Data model
 
 ### learning_sessions
-- `id uuid primary key`
-- `user_id uuid not null`
-- `topic text not null`
-- `status text not null`
-- `student_state text`
-- `mastery_result jsonb`
-- `started_at timestamptz`
-- `completed_at timestamptz nullable`
-- `created_at timestamptz`
-- `updated_at timestamptz`
+- one row per attempt;
+- user-owned topic/status/stage;
+- `model_calls_used` authoritative quota counter;
+- `mastery`, `evidence_ledger`, `mastery_result` JSONB;
+- mutable while `in_progress`, frozen after completion.
 
 ### session_turns
-- `id uuid primary key`
-- `session_id uuid not null`
-- `sequence integer not null`
-- `role text not null`
-- `interaction_type text not null`
-- `content text not null`
-- `metadata jsonb`
-- `created_at timestamptz`
+- learner turns use `client_turn_id` for idempotency;
+- student turns use `responds_to_turn_id` to link to the learner turn they answer;
+- `evaluation_state`: `pending | claimed | applied`;
+- `evaluation_claimed_at` supports stale-claim recovery;
+- partial unique indexes enforce one response per learner turn and one live evaluation per session.
 
-Possible roles:
-- learner
-- student
-- evaluator/system (do not expose private prompt content)
+No evaluator/system transcript rows are stored.
 
-Possible interaction types:
-- explanation
-- student_question
-- misconception
-- correction
-- transfer_test
-- transfer_answer
-- assessment
+## Authorization / RLS model
 
-## RLS model
-
-For every user-owned table:
-
-- authenticated user can select their own rows;
-- authenticated user can insert rows owned by their own `auth.uid()`;
-- authenticated user can update/delete only their own rows;
-- unauthenticated users receive no access unless a table is explicitly public.
-
-Service-role credentials must never be shipped to the browser.
+- `authenticated` receives SELECT-only table privileges.
+- RLS SELECT policies expose only rows where `user_id = auth.uid()`.
+- Direct INSERT/UPDATE/DELETE is revoked from authenticated clients.
+- Browser-safe create/delete/append RPCs are narrow `SECURITY DEFINER` functions that derive identity from `auth.uid()`.
+- Evaluator/quota RPCs are `SECURITY INVOKER`, executable only by `service_role`, and are invoked by the Next.js server after JWT verification.
+- The server-only Supabase secret key is never included in browser code.
+- Sensitive RPCs still compare the server-supplied verified user id with row ownership before mutation.
 
 ## Context strategy
 
@@ -261,11 +224,9 @@ Zero-cost provider or local/browser approach selected after testing.
 6. Avoid unnecessary agents, queues, vector stores, or microservices.
 7. Optimize for a reliable 1–3 minute judge demo.
 
-## Open architecture decisions
+## Remaining architecture decisions
 
-- Exact AI provider
-- Exact STT/voice provider
-- Whether student output uses TTS
-- Rate-limit implementation
-- Exact schema migration details
-- Whether session turns are written immediately or batched
+- Groq model choice: GPT-OSS 20B vs 120B, decided by Slice 3 benchmark.
+- Whether student output gains TTS later (not required for PoC).
+- Whether browser recognition needs any demo-specific caveats beyond the typed fallback.
+- Best-effort per-user/IP abuse limiting beyond the authoritative per-attempt database cap.
