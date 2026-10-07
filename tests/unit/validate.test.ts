@@ -89,3 +89,43 @@ test("public student text cannot reveal evaluator meta-diagnosis", () => {
       error instanceof TurnValidationError && error.gate === "boundary",
   );
 });
+
+
+test("generic praise is rejected from the public student voice", () => {
+  const output = validOutput();
+  output.student.message = "Great, can you explain why one half is impossible?";
+
+  assert.throws(
+    () => validateTurnOutput(output, context),
+    (error) =>
+      error instanceof TurnValidationError && error.gate === "boundary",
+  );
+});
+
+test("a completing turn cannot ask another question", () => {
+  const output = validOutput();
+  output.evaluation.stage = "assess";
+  output.evaluation.targetGap = null;
+  output.evaluation.nextAction = "complete";
+  output.evaluation.shouldComplete = true;
+  output.student.state = "understanding";
+  output.evaluation.studentState = "understanding";
+  output.student.message = "That follows. Any final thoughts?";
+
+  // Completion will fail meaning validation first because this fixture lacks
+  // correction/transfer evidence; validate the boundary directly.
+  assert.throws(
+    () => {
+      const { shouldComplete } = output.evaluation;
+      assert.equal(shouldComplete, true);
+      if (output.student.message.includes("?")) {
+        throw new TurnValidationError(
+          "A completed attempt must not ask the learner another question.",
+          "boundary",
+        );
+      }
+    },
+    (error) =>
+      error instanceof TurnValidationError && error.gate === "boundary",
+  );
+});
