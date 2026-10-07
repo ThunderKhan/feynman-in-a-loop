@@ -166,6 +166,9 @@ Minimum:
 Authorization:
 - RLS on every exposed user-owned table for browser reads;
 - SELECT policies scoped to `auth.uid()`;
+- column-level SELECT grants expose only the public UI projection; raw mastery,
+  evidence ledger, quota/claim state, client idempotency keys, and the active
+  diagnostic target remain server-only;
 - direct table INSERT/UPDATE/DELETE revoked from `authenticated`;
 - user-originated writes exposed only through narrow ownership-checking RPCs;
 - evaluator/quota mutations executable only through the trusted Next.js server;
@@ -260,12 +263,14 @@ Expected:
 ### Authorization
 - User A requests User B session ID.
 - User A attempts direct table mutation.
+- authenticated browser attempts to SELECT private evaluator/quota columns.
 - authenticated browser attempts to call server-only claim/release/apply RPCs.
 - server-only RPC is invoked with User B's verified id against User A's session.
 - anonymous user queries user-owned tables.
 
 Expected:
 - cross-user reads denied by RLS;
+- private evaluator/quota columns denied by column privileges;
 - direct table mutations denied by privileges;
 - browser cannot EXECUTE evaluator/quota RPCs;
 - server-only RPCs still reject ownership mismatch.
