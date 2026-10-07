@@ -275,7 +275,7 @@ the server should reject/repair the result rather than silently persisting it.
 ## Current implementation decisions
 
 - Hosted provider: Groq; local development fallback: Ollama.
-- Exact hosted model: benchmark-driven between GPT-OSS 20B and 120B.
+- Exact hosted model: **Groq `openai/gpt-oss-120b`**, selected by the Slice 3 benchmark. GPT-OSS 20B was rejected for this combined evaluator+student role.
 - One structured provider call per learner turn in the normal path.
 - One exceptional second call is allowed only to repair an invalid public student response or a failed structured/semantic result; every invocation consumes quota.
 - Schema validation: Zod plus server semantic/boundary gates.
