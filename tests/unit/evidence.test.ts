@@ -48,6 +48,25 @@ test("evidence quotes must be grounded in a learner turn from model context", ()
   );
 });
 
+test("the model cannot relabel an explanation as correction or transfer evidence", () => {
+  assert.throws(
+    () =>
+      validateEvidenceItems(
+        [
+          {
+            dimension: "misconceptionRepair",
+            turnId: turn.id,
+            type: "correction",
+            summary: "Pretended this was a correction.",
+            quote: null,
+          },
+        ],
+        [turn],
+      ),
+    /does not match authoritative learner-turn type/i,
+  );
+});
+
 test("ledger merge is append-only and deduplicates identical evidence", () => {
   const item = {
     dimension: "coreIdea" as const,
