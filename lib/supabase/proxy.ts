@@ -1,6 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+/** Routes reachable without an authenticated session. */
+const PUBLIC_PATHS = new Set(["/", "/login", "/signup"]);
+
 /**
  * Refreshes the auth token on every request and passes the refreshed claims
  * to Server Components, so they never attempt to refresh the same token.
@@ -10,9 +13,6 @@ import { NextResponse, type NextRequest } from "next/server";
  * deliberately never used on the server — it does not revalidate the token,
  * and cookies can be spoofed.
  */
-/** Routes reachable without an authenticated session. */
-const PUBLIC_PATHS = new Set(["/", "/login", "/signup"]);
-
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
