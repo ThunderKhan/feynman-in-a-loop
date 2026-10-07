@@ -15,7 +15,7 @@ export default async function TeachingRoomPage({
   const [{ data: sessionData, error }, { data: turnData }] = await Promise.all([
     supabase
       .from("learning_sessions")
-      .select("*")
+      .select("id, topic, status, stage, student_state")
       .eq("id", sessionId)
       .single(),
     supabase
@@ -27,7 +27,10 @@ export default async function TeachingRoomPage({
 
   if (error || !sessionData) notFound();
 
-  const session = sessionData as LearningSession;
+  const session = sessionData as Pick<
+    LearningSession,
+    "id" | "topic" | "status" | "stage" | "student_state"
+  >;
   const turns = (turnData ?? []).filter(
     (turn): turn is {
       id: string;
