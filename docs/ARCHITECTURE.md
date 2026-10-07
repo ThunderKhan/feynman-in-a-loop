@@ -155,7 +155,7 @@ No evaluator/system transcript rows are stored.
 - `authenticated` receives SELECT-only table privileges.
 - RLS SELECT policies expose only rows where `user_id = auth.uid()`.
 - Direct INSERT/UPDATE/DELETE is revoked from authenticated clients.
-- Browser-safe create/delete/append RPCs are narrow `SECURITY DEFINER` functions that derive identity from `auth.uid()`.
+- Browser-safe create/append RPCs are narrow `SECURITY DEFINER` functions that derive identity from `auth.uid()`.
 - Evaluator/quota RPCs are `SECURITY INVOKER`, executable only by `service_role`, and are invoked by the Next.js server after JWT verification.
 - The server-only Supabase secret key is never included in browser code.
 - Sensitive RPCs still compare the server-supplied verified user id with row ownership before mutation.
