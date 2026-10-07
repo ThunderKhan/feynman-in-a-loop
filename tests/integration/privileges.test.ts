@@ -43,17 +43,6 @@ test("setup", async () => {
   bob = await createTestUser("priv_bob");
 });
 
-/** Asserts a direct mutation failed AND had no effect. */
-async function assertNoDirectMutation(
-  label: string,
-  mutate: () => Promise<unknown>,
-  sessionId: string,
-  verify: () => Promise<void>,
-) {
-  await mutate();
-  await verify();
-}
-
 test("1. a user cannot directly reset model_calls_used", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
