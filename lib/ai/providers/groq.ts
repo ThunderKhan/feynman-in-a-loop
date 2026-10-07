@@ -17,7 +17,11 @@ type GroqResponse = {
   };
 };
 
+export const GROQ_PRODUCTION_MODEL = "openai/gpt-oss-120b" as const;
+
 export class GroqProvider implements AIProvider {
+  constructor(private readonly model: string = GROQ_PRODUCTION_MODEL) {}
+
   async completeTurn(input: TurnInput): Promise<TurnOutput> {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
@@ -27,7 +31,7 @@ export class GroqProvider implements AIProvider {
       );
     }
 
-    const model = process.env.GROQ_MODEL ?? "openai/gpt-oss-120b";
+    const model = this.model;
     let response: Response;
 
     try {
