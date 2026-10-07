@@ -47,7 +47,9 @@ export class GroqProvider implements AIProvider {
           messages: [{ role: "user", content: buildTurnUserMessage(input) }],
           reasoning_effort: "medium",
           reasoning_format: "hidden",
-          max_completion_tokens: 1800,
+          max_completion_tokens: 2600,
+          temperature: 0.6,
+          top_p: 0.95,
           stream: false,
           response_format: {
             type: "json_schema",
@@ -76,10 +78,24 @@ export class GroqProvider implements AIProvider {
       const detail = failedGeneration
         ? ` Failed generation: ${failedGeneration}`
         : "";
+      const message =
+        (body.error?.message ?? `Groq returned HTTP ${response.status}`) + detail;
+
+      // Groq documents strict structured output as schema-guaranteed, but the
+      // live API can still return 400 failed_generation/jsonschema errors.
+      // Treat those as a distinct transient class so the application may spend
+      // one explicitly-accounted retry without weakening strict mode.
+      const structuredFailure =
+        response.status === 400 &&
+        (/generated json does not match/i.test(message) ||
+          /failed to validate json/i.test(message) ||
+          /jsonschema/i.test(message) ||
+          /valid document/i.test(message) ||
+          /expected object, but got array/i.test(message));
 
       throw new AIProviderError(
-        (body.error?.message ?? `Groq returned HTTP ${response.status}`) + detail,
-        "provider_rejected",
+        message,
+        structuredFailure ? "structured_output_failure" : "provider_rejected",
         response.status,
       );
     }
