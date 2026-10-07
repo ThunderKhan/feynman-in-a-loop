@@ -33,14 +33,6 @@ const DIMENSIONS: Dimension[] = [
   "transfer",
 ];
 
-function normalizeForLeakCheck(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 export function validateStudentBoundary(output: TurnOutput) {
   if (output.student.state !== output.evaluation.studentState) {
     throw new TurnValidationError(
