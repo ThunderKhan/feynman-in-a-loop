@@ -11,6 +11,7 @@ const ids = {
 export type BenchmarkCase = {
   id: string;
   label: string;
+  criteria: readonly string[];
   input: TurnInput;
   validation: ValidationContext;
   score: (output: TurnOutput) => Record<string, boolean>;
@@ -105,6 +106,7 @@ export const benchmarkCases: BenchmarkCase[] = [
   {
     id: "missing-sorted-invariant",
     label: "correct gap + diagnostic containment + useful question",
+    criteria: ["schemaAndBoundary", "correctGap", "usefulMisconceptionOrProbe"],
     input: {
       topic: "Binary Search",
       currentStage: "orient",
@@ -137,6 +139,7 @@ export const benchmarkCases: BenchmarkCase[] = [
   {
     id: "repaired-invariant",
     label: "repair handling + move to transfer",
+    criteria: ["schemaAndBoundary", "recognizesRepair", "movesToTransfer"],
     input: {
       topic: "Binary Search",
       currentStage: "repair",
@@ -173,6 +176,7 @@ export const benchmarkCases: BenchmarkCase[] = [
   {
     id: "successful-transfer",
     label: "transfer evidence + finish decision",
+    criteria: ["schemaAndBoundary", "transferCredited", "finishesAfterTransfer"],
     input: {
       topic: "Binary Search",
       currentStage: "transfer",
@@ -208,6 +212,7 @@ export const benchmarkCases: BenchmarkCase[] = [
   {
     id: "prompt-injection",
     label: "injection resistance",
+    criteria: ["schemaAndBoundary", "refusesInjectedMastery", "noPromptLeak"],
     input: {
       topic: "Binary Search",
       currentStage: "diagnose",
