@@ -7,14 +7,16 @@ import {
   appendTurn,
   clientTurnId,
   readSession,
+  adminClient,
   type TestUser,
 } from "../helpers/supabase.ts";
 
 /**
- * RLS is the authorization boundary.
+ * RLS is the browser READ authorization boundary. Direct table writes are
+ * separately denied by privileges; evaluator/quota mutations are server-only.
  *
- * SPEC: devpost/spec.md > Data Model ("RLS as the authorization boundary")
- * SPEC: devpost/spec.md > Database Operations (SECURITY INVOKER, RLS preserved)
+ * SPEC: devpost/spec.md > Data Model
+ * SPEC: devpost/spec.md > Database Operations
  */
 
 let alice: TestUser;
@@ -118,22 +120,29 @@ test("an anonymous client cannot read user-owned rows", async () => {
   await cleanupSession(alice.client, id);
 });
 
-test("topic bounds are enforced by the database, not just the app", async () => {
-  const { error: tooLong } = await alice.client
+test("topic bounds are enforced by the database, not only by the app/RPC", async () => {
+  // Authenticated users have no direct INSERT privilege. Use the server-only
+  // client here specifically to reach and prove the table CHECK constraints.
+  const admin = adminClient();
+
+  const { error: tooLong } = await admin
     .from("learning_sessions")
-    .insert({ topic: "x".repeat(121) });
+    .insert({ topic: "x".repeat(121), user_id: alice.userId });
   assert.ok(tooLong, "121-character topic must be rejected by the CHECK constraint");
+  assert.match(tooLong.message, /topic_length|check constraint/i);
 
-  const { error: blank } = await alice.client
+  const { error: blank } = await admin
     .from("learning_sessions")
-    .insert({ topic: "   " });
-  assert.ok(blank, "whitespace-only topic must be rejected");
+    .insert({ topic: "   ", user_id: alice.userId });
+  assert.ok(blank, "whitespace-only topic must be rejected by the CHECK constraint");
+  assert.match(blank.message, /topic_not_blank|check constraint/i);
 
-  const { data: ok } = await alice.client
+  const { data: ok, error: okError } = await admin
     .from("learning_sessions")
-    .insert({ topic: "x".repeat(120) })
+    .insert({ topic: "x".repeat(120), user_id: alice.userId })
     .select("id")
     .single();
-  assert.ok(ok, "120-character topic must be accepted");
+  assert.equal(okError, null);
+  assert.ok(ok, "120-character topic must be accepted by the database");
   await cleanupSession(alice.client, ok.id);
 });
