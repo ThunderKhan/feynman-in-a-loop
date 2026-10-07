@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import { Send, RotateCcw } from "lucide-react";
 import { StudentOrb } from "@/components/student/student-orb";
 import type { Stage, StudentState } from "@/lib/types";
@@ -49,6 +49,7 @@ export function TeachingRoomClient({
   const [pending, setPending] = useState<PendingTurn | null>(initialPending);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inFlightRef = useRef(false);
 
   const isCompleted = completed || stage === "completed";
 
@@ -62,6 +63,11 @@ export function TeachingRoomClient({
   );
 
   async function submitTurn(turn: PendingTurn) {
+    // React state updates are asynchronous, so `busy` alone leaves a tiny
+    // double-click window where two different clientTurnIds can be submitted.
+    // The ref closes that window synchronously and preserves one learner turn.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setBusy(true);
     setError(null);
     setStudentState("thinking");
@@ -97,12 +103,14 @@ export function TeachingRoomClient({
 
       const body = (await response.json().catch(() => null)) as
         | PublicResponse
-        | { error?: { message?: string; retryable?: boolean } }
+        | { error?: { code?: string; message?: string; retryable?: boolean } }
         | null;
 
       if (!response.ok || !body || !("student" in body)) {
-        const message =
-          body && "error" in body
+        const providerRateLimited = response.status === 429;
+        const message = providerRateLimited
+          ? "The AI provider is rate-limited right now. Wait a moment, then try again."
+          : body && "error" in body
             ? body.error?.message
             : "The AI student could not respond.";
         throw new Error(message ?? "The AI student could not respond.");
@@ -130,6 +138,7 @@ export function TeachingRoomClient({
           : "The AI student could not respond.",
       );
     } finally {
+      inFlightRef.current = false;
       setBusy(false);
     }
   }
@@ -267,7 +276,7 @@ export function TeachingRoomClient({
                 className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-base-800 px-4 py-3 text-sm text-base-400"
                 role="alert"
               >
-                <span>{error} Your turn is saved.</span>
+                <span>{error}</span>
                 {pending ? (
                   <button
                     type="button"
