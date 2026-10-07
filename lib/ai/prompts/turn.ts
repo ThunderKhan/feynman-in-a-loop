@@ -68,6 +68,41 @@ function repairInstruction(input: TurnInput) {
   };
 }
 
+const OUTPUT_CONTRACT = `
+Return exactly one JSON object with these top-level keys:
+- evaluation
+- student
+
+evaluation MUST contain every key below:
+- stage
+- studentState
+- dimensions
+- targetGap
+- nextAction
+- shouldComplete
+- evidence
+
+dimensions MUST contain all four keys:
+- coreIdea
+- mechanism
+- misconceptionRepair
+- transfer
+
+Every evidence item MUST contain:
+- dimension
+- turnId
+- type
+- summary
+- quote
+
+student MUST contain:
+- state
+- message
+
+Do not omit keys. Use null for targetGap or quote when no value applies.
+Do not wrap the JSON in markdown and do not add commentary outside it.
+`.trim();
+
 export function buildTurnUserMessage(input: TurnInput) {
   const payload = {
     instruction: repairInstruction(input),
@@ -88,6 +123,11 @@ export function buildTurnUserMessage(input: TurnInput) {
   };
 
   return [
+    TURN_SYSTEM_PROMPT,
+    "",
+    "OUTPUT CONTRACT:",
+    OUTPUT_CONTRACT,
+    "",
     "SESSION_DATA_BEGIN",
     JSON.stringify(payload),
     "SESSION_DATA_END",
