@@ -4,8 +4,6 @@ import {
   createTestUser,
   createSession,
   cleanupSession,
-  appendTurn,
-  claimCall,
   completeSession,
   readSession,
   readTurns,
