@@ -12,6 +12,7 @@ export class AIProviderError extends Error {
       | "provider_unavailable"
       | "provider_rejected"
       | "invalid_provider_response"
+      | "structured_output_failure"
       | "provider_not_configured",
     status?: number,
   ) {
@@ -20,4 +21,11 @@ export class AIProviderError extends Error {
     this.code = code;
     this.status = status;
   }
+}
+
+export function isRetryableStructuredOutputError(error: unknown) {
+  return (
+    error instanceof AIProviderError &&
+    error.code === "structured_output_failure"
+  );
 }
