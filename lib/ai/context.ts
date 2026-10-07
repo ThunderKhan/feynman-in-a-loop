@@ -1,12 +1,12 @@
-import type { LearningSession, MasteryDimensions } from "@/lib/types";
+import type { LearningSession, MasteryDimensions } from "../types";
 import {
   EMPTY_MASTERY,
   normalizeDimensionState,
   type ContextTurn,
   type EvidenceLedger,
   type TurnContext,
-} from "@/lib/ai/types";
-import { normalizeLedger } from "@/lib/ai/evidence";
+} from "./types";
+import { normalizeLedger } from "./evidence";
 
 export type StoredTurn = {
   id: string;
