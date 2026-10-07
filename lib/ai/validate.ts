@@ -1,17 +1,17 @@
-import { TurnOutputSchema } from "@/lib/ai/schemas/turn";
+import { TurnOutputSchema } from "./schemas/turn";
 import type {
   Dimension,
   EvidenceLedger,
   TurnOutput,
   ValidationContext,
   ValidationResult,
-} from "@/lib/ai/types";
+} from "./types";
 import {
   ledgerHasEvidenceForEveryDimension,
   ledgerHasType,
   mergeEvidenceLedger,
   validateEvidenceItems,
-} from "@/lib/ai/evidence";
+} from "./evidence";
 
 export class TurnValidationError extends Error {
   constructor(
