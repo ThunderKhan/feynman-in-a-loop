@@ -285,6 +285,49 @@ test("a user cannot delete their own session through the browser", async () => {
   }
 });
 
+test("authenticated browser cannot SELECT private evaluator or quota columns", async () => {
+  const sid = await createSession(alice.client, "Binary Search");
+  try {
+    const { turnId } = await appendTurn(
+      alice.client,
+      sid,
+      "Binary search checks a midpoint in sorted data.",
+    );
+
+    const privateSession = await alice.client
+      .from("learning_sessions")
+      .select("model_calls_used, mastery, evidence_ledger, active_target_gap")
+      .eq("id", sid)
+      .single();
+    assert.ok(
+      privateSession.error,
+      "browser must not be able to read evaluator/quota session columns",
+    );
+    assert.equal(privateSession.data, null);
+
+    const privateTurn = await alice.client
+      .from("session_turns")
+      .select("evaluation_state, evaluation_claimed_at, client_turn_id, user_id")
+      .eq("id", turnId)
+      .single();
+    assert.ok(
+      privateTurn.error,
+      "browser must not be able to read evaluation lifecycle columns",
+    );
+    assert.equal(privateTurn.data, null);
+
+    const publicSession = await alice.client
+      .from("learning_sessions")
+      .select("id, topic, status, stage, student_state")
+      .eq("id", sid)
+      .single();
+    assert.equal(publicSession.error, null);
+    assert.equal(publicSession.data?.id, sid);
+  } finally {
+    await cleanupSession(alice.client, sid);
+  }
+});
+
 test("authenticated browser cannot invoke server-only evaluator RPCs", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
