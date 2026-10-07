@@ -72,17 +72,16 @@ test("a session row cannot be updated by anyone, including its owner", async () 
   assert.equal(data!.topic, "Gradient Descent", "row must be unchanged");
   await cleanupSession(alice.client, id);
 });
-test("a session cannot be deleted by another user, and not directly at all", async () => {
+test("a session cannot be deleted through the authenticated browser surface", async () => {
   const id = await createSession(alice.client, "Photosynthesis");
 
-  // Direct delete is blocked by privilege, so the row survives...
   const direct = await bob.client.from("learning_sessions").delete().eq("id", id);
   assert.ok(direct.error, "direct delete must be rejected");
   assert.ok((await readSession(alice.client, id)).data, "row must still exist");
 
-  // ...and the authorized RPC refuses cross-user deletion.
-  const cross = await bob.client.rpc("delete_session", { p_session_id: id });
-  assert.ok(cross.error, "cross-user delete must be refused");
+  // Deletion is intentionally absent from the product RPC surface.
+  const rpc = await alice.client.rpc("delete_session", { p_session_id: id });
+  assert.ok(rpc.error, "delete_session must not be browser-callable/present");
   assert.ok((await readSession(alice.client, id)).data, "row must still exist");
 
   await cleanupSession(alice.client, id);
