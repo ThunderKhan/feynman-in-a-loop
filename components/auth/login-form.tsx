@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import type { AuthActionState } from "@/app/actions/auth";
 
@@ -17,76 +17,20 @@ export function LoginForm({ action }: { action: AuthAction }) {
   const [showPassword, setShowPassword] = useState(false);
 
   return (
-    <main className="min-h-dvh bg-[#f3f2ee] text-[#171717] lg:grid lg:grid-cols-[minmax(0,1.08fr)_minmax(430px,0.92fr)]">
-      <section className="relative hidden min-h-dvh overflow-hidden border-r border-white/10 bg-base-950 lg:flex lg:flex-col">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_35%_30%,rgba(110,168,254,0.14),transparent_34%),radial-gradient(circle_at_72%_68%,rgba(110,168,254,0.08),transparent_30%)]" />
-        <div className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.12)_1px,transparent_1px)] [background-size:48px_48px]" />
-
-        <div className="relative z-10 flex items-center justify-between px-8 pt-8">
-          <Link
-            href="/"
-            aria-label="Back to home"
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-base-200 backdrop-blur-sm transition hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-base-400">
-            Feynman-in-a-Loop
-          </p>
-        </div>
-
-        <div className="relative z-10 flex flex-1 items-center justify-center px-10 py-12">
-          <div className="w-full max-w-2xl overflow-hidden rounded-[2rem] border border-white/[0.08] bg-white/[0.025] shadow-[0_24px_90px_rgba(0,0,0,0.32)]">
-            <div className="relative aspect-[4/3] overflow-hidden bg-base-950">
-              <div
-                role="img"
-                aria-label="ASCII-style artwork of Richard Feynman teaching at a chalkboard"
-                className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-                style={{
-                  backgroundImage:
-                    'url("/images/auth/feynman-ascii.svg")',
-                }}
-              />
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-base-950/45 via-transparent to-white/[0.02]" />
-            </div>
-
-            <div className="border-t border-white/[0.08] px-6 py-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-base-600">
-                The Feynman technique
-              </p>
-              <p className="mt-3 font-editorial text-2xl leading-tight text-base-200">
-                Teach another mind.
-                <br />
-                Find the gaps in yours.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="relative z-10 px-8 pb-8">
-          <p className="max-w-md text-sm leading-6 text-base-400">
-            Do not ask AI whether you understand something. Prove it by teaching
-            an AI student.
-          </p>
-        </div>
+    <main className="min-h-dvh bg-[#f3f2ee] text-[#171717] lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(430px,0.92fr)]">
+      <section className="relative hidden min-h-dvh overflow-hidden bg-black lg:block">
+        <div
+          role="img"
+          aria-label="ASCII-style artwork of Richard Feynman teaching at a chalkboard"
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{
+            backgroundImage: 'url("/images/auth/feynman-ascii.svg")',
+          }}
+        />
       </section>
 
       <section className="flex min-h-dvh items-center justify-center px-6 py-10 sm:px-10 lg:px-14 xl:px-20">
         <div className="w-full max-w-[440px]">
-          <div className="mb-10 flex items-center justify-between lg:hidden">
-            <Link
-              href="/"
-              aria-label="Back to home"
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-black/10 bg-white/60 text-neutral-700 transition hover:bg-white"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-neutral-500">
-              Feynman-in-a-Loop
-            </p>
-          </div>
-
           <header className="mb-9">
             <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.24em] text-neutral-500">
               Continue learning
