@@ -164,10 +164,12 @@ Minimum:
 - session handling appropriate for Next.js.
 
 Authorization:
-- RLS on every exposed user-owned table;
-- policies scoped to `auth.uid()`;
-- explicit operation policies for SELECT/INSERT/UPDATE/DELETE;
-- test both allowed and denied cases.
+- RLS on every exposed user-owned table for browser reads;
+- SELECT policies scoped to `auth.uid()`;
+- direct table INSERT/UPDATE/DELETE revoked from `authenticated`;
+- user-originated writes exposed only through narrow ownership-checking RPCs;
+- evaluator/quota mutations executable only through the trusted Next.js server;
+- test both allowed and denied cases, including direct PostgREST attempts.
 
 Do not rely on:
 - hidden buttons;
@@ -180,9 +182,10 @@ Browser:
 - only browser-safe publishable key as intended by Supabase.
 
 Server only:
-- service-role / secret keys.
+- Supabase secret key used only for authoritative evaluator/quota RPCs;
+- AI provider keys.
 
-Service-role credentials bypass RLS and must never be exposed to the browser.
+The Supabase secret key bypasses RLS and must never be exposed to the browser. The server must first verify the user's JWT, then pass the verified user id into the server-only RPC; each RPC re-checks row ownership before mutating. Browser clients have no EXECUTE privilege on claim/release/apply RPCs.
 
 ## Environment variables
 
@@ -256,11 +259,16 @@ Expected:
 
 ### Authorization
 - User A requests User B session ID.
-- User A attempts to update/delete User B turn.
+- User A attempts direct table mutation.
+- authenticated browser attempts to call server-only claim/release/apply RPCs.
+- server-only RPC is invoked with User B's verified id against User A's session.
 - anonymous user queries user-owned tables.
 
 Expected:
-- denied by database policy.
+- cross-user reads denied by RLS;
+- direct table mutations denied by privileges;
+- browser cannot EXECUTE evaluator/quota RPCs;
+- server-only RPCs still reject ownership mismatch.
 
 ### Model-output validation
 - missing field;
@@ -276,7 +284,7 @@ Expected:
 
 - [ ] RLS enabled on all exposed user tables.
 - [ ] RLS allow/deny cases tested.
-- [ ] No service-role secret in client.
+- [ ] Supabase server secret exists only in server/test environment code and is absent from client bundles.
 - [ ] No AI secret in client.
 - [ ] `.env*` secrets ignored.
 - [ ] `.env.example` contains placeholders only.
