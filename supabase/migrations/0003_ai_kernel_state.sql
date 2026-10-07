@@ -1,7 +1,7 @@
 -- 0003_ai_kernel_state.sql
 -- Slice 3: persist the active private diagnostic target between bounded model
--- contexts. The browser can read its own session row through RLS, but the
--- application never exposes this column in the turn endpoint response.
+-- contexts. RLS still scopes rows, while column-level SELECT grants keep the
+-- private evaluator/quota fields unreadable from an authenticated browser.
 --
 -- Rerun-safe for development: column/constraint/function replacement is
 -- explicit and the old apply_turn_result signature is removed first.
