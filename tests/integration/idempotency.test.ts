@@ -6,6 +6,7 @@ import {
   cleanupSession,
   appendTurn,
   readTurns,
+  claimCall,
   applyResult,
   type TestUser,
   assertSchemaReady,} from "../helpers/supabase.ts";
@@ -72,6 +73,97 @@ test("a repeated clientTurnId returns the same turn and inserts no duplicate", a
 
     const turns = await readTurns(alice.client, sid);
     assert.equal(turns.data.length, 1, "retry must not create a second learner turn");
+  } finally {
+    await cleanupSession(alice.client, sid);
+  }
+});
+
+test("a completed final turn can be replayed with the same clientTurnId after a lost response", async () => {
+  const sid = await createSession(alice.client, "Binary Search");
+  const clientId = crypto.randomUUID();
+  const content = "Binary search repeatedly halves a sorted search space.";
+
+  try {
+    const first = await alice.client.rpc("append_learner_turn", {
+      p_session_id: sid,
+      p_client_turn_id: clientId,
+      p_content: content,
+      p_source: "typed",
+    });
+    assert.equal(first.error, null);
+    const turnId = first.data as string;
+
+    assert.equal((await claimCall(alice.client, sid, turnId)).ok, true);
+    const applied = await applyResult(alice.client, {
+      sessionId: sid,
+      learnerTurnId: turnId,
+      stage: "assess",
+      complete: true,
+      studentState: "mastered",
+      message: "I think I get it now.",
+      interactionType: "assessment",
+      mastery: {
+        coreIdea: "mastered",
+        mechanism: "mastered",
+        misconceptionRepair: "mastered",
+        transfer: "mastered",
+      },
+      evidenceLedger: {
+        coreIdea: [{ dimension: "coreIdea", turnId, type: "explanation", summary: "Core idea.", quote: null }],
+        mechanism: [{ dimension: "mechanism", turnId, type: "explanation", summary: "Mechanism.", quote: null }],
+        misconceptionRepair: [{ dimension: "misconceptionRepair", turnId, type: "correction", summary: "Repair.", quote: null }],
+        transfer: [{ dimension: "transfer", turnId, type: "transfer_answer", summary: "Transfer.", quote: null }],
+      },
+      masteryResult: { overall: "mastered" },
+    });
+    assert.equal(applied.ok, true, applied.error ?? "");
+
+    // Simulate the browser losing that HTTP response and retrying the same
+    // clientTurnId after the attempt is already completed.
+    const replay = await alice.client.rpc("append_learner_turn", {
+      p_session_id: sid,
+      p_client_turn_id: clientId,
+      p_content: content,
+      p_source: "typed",
+    });
+    assert.equal(replay.error, null);
+    assert.equal(replay.data, turnId);
+
+    const turns = await readTurns(alice.client, sid);
+    assert.equal(
+      turns.data.filter((turn: { role: string }) => turn.role === "learner").length,
+      1,
+      "replay after completion must not create new evidence",
+    );
+  } finally {
+    await cleanupSession(alice.client, sid);
+  }
+});
+
+test("reusing a clientTurnId with different content is rejected", async () => {
+  const sid = await createSession(alice.client, "Recursion");
+  const clientId = crypto.randomUUID();
+
+  try {
+    const first = await alice.client.rpc("append_learner_turn", {
+      p_session_id: sid,
+      p_client_turn_id: clientId,
+      p_content: "A recursive function calls itself.",
+      p_source: "typed",
+    });
+    assert.equal(first.error, null);
+
+    const mismatch = await alice.client.rpc("append_learner_turn", {
+      p_session_id: sid,
+      p_client_turn_id: clientId,
+      p_content: "This is different content for the same id.",
+      p_source: "typed",
+    });
+    assert.ok(mismatch.error, "idempotency keys must not be reusable for different evidence");
+    assert.match(mismatch.error.message, /different learner content/i);
+
+    const turns = await readTurns(alice.client, sid);
+    assert.equal(turns.data.length, 1);
   } finally {
     await cleanupSession(alice.client, sid);
   }
