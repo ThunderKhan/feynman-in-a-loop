@@ -22,6 +22,103 @@ alter table public.learning_sessions
     )
   );
 
+-- Fix end-to-end idempotency across completion. A lost HTTP response after a
+-- successful final apply must be replayable with the same clientTurnId even
+-- though the session is now completed. Therefore the existing-turn lookup
+-- occurs after ownership verification but before the completed-session guard.
+create or replace function public.append_learner_turn(
+  p_session_id      uuid,
+  p_client_turn_id  uuid,
+  p_content         text,
+  p_source          text default 'voice'
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $
+declare
+  v_user uuid := auth.uid();
+  v_session public.learning_sessions%rowtype;
+  v_existing uuid;
+  v_existing_content text;
+  v_existing_source text;
+  v_turn_id uuid;
+  v_sequence integer;
+  v_type text;
+begin
+  if v_user is null then
+    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  end if;
+
+  select * into v_session
+    from public.learning_sessions s
+   where s.id = p_session_id
+   for update;
+
+  if not found then
+    raise exception 'session not found' using errcode = 'no_data_found';
+  end if;
+
+  if v_session.user_id <> v_user then
+    raise exception 'not your session' using errcode = 'insufficient_privilege';
+  end if;
+
+  select t.id, t.content, t.source
+    into v_existing, v_existing_content, v_existing_source
+    from public.session_turns t
+   where t.session_id = p_session_id
+     and t.client_turn_id = p_client_turn_id
+     and t.role = 'learner';
+
+  if v_existing is not null then
+    if v_existing_content <> p_content or v_existing_source <> p_source then
+      raise exception 'clientTurnId was already used for different learner content'
+        using errcode = 'unique_violation';
+    end if;
+    return v_existing;
+  end if;
+
+  if v_session.status <> 'in_progress' then
+    raise exception 'session is completed and immutable'
+      using errcode = 'check_violation';
+  end if;
+
+  if char_length(coalesce(btrim(p_content), '')) = 0 then
+    raise exception 'learner turn is empty' using errcode = 'check_violation';
+  end if;
+
+  if char_length(p_content) > 4000 then
+    raise exception 'learner turn too long' using errcode = 'check_violation';
+  end if;
+
+  if p_source not in ('voice', 'typed') then
+    raise exception 'invalid source' using errcode = 'check_violation';
+  end if;
+
+  v_type := case v_session.stage
+    when 'repair'   then 'correction'
+    when 'transfer' then 'transfer_answer'
+    else 'explanation'
+  end case;
+
+  select coalesce(max(t.sequence), 0) + 1 into v_sequence
+    from public.session_turns t
+   where t.session_id = p_session_id;
+
+  insert into public.session_turns (
+    session_id, user_id, client_turn_id, sequence, role,
+    interaction_type, source, content
+  ) values (
+    p_session_id, v_user, p_client_turn_id, v_sequence, 'learner',
+    v_type, p_source, p_content
+  )
+  returning id into v_turn_id;
+
+  return v_turn_id;
+end;
+$;
+
 -- Remove the Slice 2 signature so PostgREST cannot retain an old overload.
 drop function if exists public.apply_turn_result(
   uuid, uuid, uuid, text, text, text, text, jsonb, jsonb, boolean, jsonb
