@@ -6,6 +6,7 @@ import type {
   ValidationContext,
   ValidationResult,
 } from "./types.ts";
+import { priorityRuleMatchesEvaluation } from "./priority.ts";
 import {
   ledgerHasEvidenceForEveryDimension,
   ledgerHasType,
@@ -131,6 +132,16 @@ function validateMeaning(
   if (!allowedActions[stage].includes(output.evaluation.nextAction)) {
     throw new TurnValidationError(
       `nextAction ${output.evaluation.nextAction} is inconsistent with stage ${stage}.`,
+      "meaning",
+    );
+  }
+
+  if (
+    context.priorityRule &&
+    !priorityRuleMatchesEvaluation(context.priorityRule, output.evaluation)
+  ) {
+    throw new TurnValidationError(
+      `Highest-priority diagnostic contract not satisfied: ${context.priorityRule.instruction}`,
       "meaning",
     );
   }
