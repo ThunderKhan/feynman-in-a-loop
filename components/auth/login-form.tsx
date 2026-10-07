@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import type { AuthActionState } from "@/app/actions/auth";
 
@@ -19,13 +20,13 @@ export function LoginForm({ action }: { action: AuthAction }) {
   return (
     <main className="min-h-dvh bg-[#f3f2ee] text-[#171717] lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(430px,0.92fr)]">
       <section className="relative hidden min-h-dvh overflow-hidden bg-black lg:block">
-        <div
-          role="img"
-          aria-label="ASCII-style artwork of Richard Feynman teaching at a chalkboard"
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-          style={{
-            backgroundImage: 'url("/images/auth/feynman-ascii.svg")',
-          }}
+        <Image
+          src="/images/auth/feynman-ascii.svg"
+          alt="ASCII-style artwork of Richard Feynman teaching at a chalkboard"
+          fill
+          priority
+          sizes="55vw"
+          className="object-cover object-center"
         />
       </section>
 
