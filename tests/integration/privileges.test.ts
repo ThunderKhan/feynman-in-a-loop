@@ -11,6 +11,7 @@ import {
   completeSession,
   readSession,
   readTurns,
+  adminClient,
   type TestUser,
 } from "../helpers/supabase.ts";
 
@@ -24,8 +25,8 @@ await assertSchemaReady(probe.client);
  * The privilege model.
  *
  *   RLS answers "which rows". It does NOT protect authoritative columns.
- *   The authenticated client may READ its own data; authoritative learning and
- *   evaluation state may only change through the approved RPCs.
+ *   The authenticated client may READ its own data. User-originated writes
+ *   use narrow ownership-checking RPCs; evaluator/quota RPCs are server-only.
  *
  * Every case here is a direct PostgREST mutation attempt, i.e. exactly what an
  * attacker with a valid session and network access would try.
@@ -295,7 +296,48 @@ test("a user cannot delete their own session directly (delete goes through the R
   }
 });
 
-test("the same operations DO succeed through their authorized RPC", async () => {
+test("authenticated browser cannot invoke server-only evaluator RPCs", async () => {
+  const sid = await createSession(alice.client, "Binary Search");
+  try {
+    const { turnId } = await appendTurn(alice.client, sid, "It halves the search space.");
+
+    const directClaim = await alice.client.rpc("claim_model_call", {
+      p_user_id: alice.userId,
+      p_session_id: sid,
+      p_learner_turn_id: turnId,
+    });
+    assert.ok(directClaim.error, "claim_model_call must be server-only");
+
+    const directRelease = await alice.client.rpc("release_model_call", {
+      p_user_id: alice.userId,
+      p_session_id: sid,
+      p_learner_turn_id: turnId,
+    });
+    assert.ok(directRelease.error, "release_model_call must be server-only");
+
+    const directApply = await alice.client.rpc("apply_turn_result", {
+      p_user_id: alice.userId,
+      p_session_id: sid,
+      p_learner_turn_id: turnId,
+      p_student_state: "mastered",
+      p_message: "I get it.",
+      p_interaction_type: "assessment",
+      p_stage: "completed",
+      p_mastery: { coreIdea: "mastered" },
+      p_evidence_ledger: {},
+      p_complete: true,
+      p_mastery_result: { overall: "mastered" },
+    });
+    assert.ok(directApply.error, "apply_turn_result must be server-only");
+
+    assert.equal((await readSession(alice.client, sid)).data!.model_calls_used, 0);
+    assert.equal((await readSession(alice.client, sid)).data!.status, "in_progress");
+  } finally {
+    await cleanupSession(alice.client, sid);
+  }
+});
+
+test("the same operations DO succeed through their authorized server paths", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
     // create_session
@@ -336,10 +378,18 @@ test("one user still cannot mutate another user's rows", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
     const { error } = await bob.client.rpc("claim_model_call", {
+      p_user_id: bob.userId,
       p_session_id: sid,
       p_learner_turn_id: crypto.randomUUID(),
     });
-    assert.ok(error, "cross-user RPC must be refused");
+    assert.ok(error, "browser must not have EXECUTE on server-only claim RPC");
+
+    const adminClaim = await adminClient().rpc("claim_model_call", {
+      p_user_id: bob.userId,
+      p_session_id: sid,
+      p_learner_turn_id: crypto.randomUUID(),
+    });
+    assert.ok(adminClaim.error, "server-only RPC must still enforce row ownership");
 
     const del = await bob.client.rpc("delete_session", { p_session_id: sid });
     assert.ok(del.error, "cross-user delete must be refused");
