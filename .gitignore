@@ -2,6 +2,10 @@
 .env
 .env.*
 !.env.example
+!.env.test.example
+
+# Throwaway integration-test account credentials (created on first run)
+.env.test.local
 
 # Personal learning context from the Devpost Learn workflow
 /devpost/learner-profile.md
