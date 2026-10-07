@@ -1,8 +1,8 @@
-import type { TurnInput, TurnOutput } from "./types";
-import { GroqProvider } from "./providers/groq";
-import { OllamaProvider } from "./providers/ollama";
+import type { TurnInput, TurnOutput } from "./types.ts";
+import { GroqProvider } from "./providers/groq.ts";
+import { OllamaProvider } from "./providers/ollama.ts";
 
-import { AIProviderError } from "./errors";
+import { AIProviderError } from "./errors.ts";
 
 export interface AIProvider {
   completeTurn(input: TurnInput): Promise<TurnOutput>;
