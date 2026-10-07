@@ -6,6 +6,7 @@ import {
   cleanupSession,
   appendTurn,
   claimCall,
+  releaseCall,
   applyResult,
   readSession,
   readTurns,
@@ -126,6 +127,42 @@ test("concurrent claims for one turn: exactly one wins", async () => {
   }
 });
 
+test("concurrent claims for different turns in one session: exactly one wins", async () => {
+  const sid = await createSession(alice.client, "Binary Search");
+  try {
+    const first = await appendTurn(alice.client, sid, "First explanation.");
+    const second = await appendTurn(alice.client, sid, "Second explanation.");
+
+    const results = await Promise.all([
+      claimCall(alice.client, sid, first.turnId),
+      claimCall(alice.client, sid, second.turnId),
+    ]);
+
+    assert.equal(
+      results.filter((r) => r.ok).length,
+      1,
+      "the database must allow only one live evaluation per session",
+    );
+    assert.equal(
+      (await readSession(alice.client, sid)).data!.model_calls_used,
+      1,
+      "the losing concurrent claim must roll its quota increment back",
+    );
+
+    const turns = await readTurns(alice.client, sid);
+    assert.equal(
+      turns.data.filter(
+        (t: { role: string; evaluation_state: string }) =>
+          t.role === "learner" && t.evaluation_state === "claimed",
+      ).length,
+      1,
+      "exactly one learner turn may remain claimed",
+    );
+  } finally {
+    await cleanupSession(alice.client, sid);
+  }
+});
+
 test("a claim is consumed even when the provider call subsequently fails", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
@@ -155,22 +192,21 @@ test("a claim is consumed even when the provider call subsequently fails", async
 test("the cap refuses further claims (max 8 per attempt)", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
-    // Eight learner turns, eight claims — exactly at the cap.
-    const turns: string[] = [];
+    const { turnId } = await appendTurn(alice.client, sid, "It halves the search space.");
+
+    // Simulate eight provider attempts that fail after being charged. The
+    // single-live-claim invariant means each failed attempt is explicitly
+    // released before the next one can be claimed.
     for (let i = 0; i < 8; i++) {
-      const { turnId } = await appendTurn(alice.client, sid, `Explanation part ${i + 1}.`);
-      turns.push(turnId);
-    }
-    for (const t of turns) {
-      const claim = await claimCall(alice.client, sid, t);
-      assert.equal(claim.ok, true, `claim ${t} should succeed below the cap`);
+      const claim = await claimCall(alice.client, sid, turnId);
+      assert.equal(claim.ok, true, `claim ${i + 1} should succeed below the cap`);
+      const release = await releaseCall(alice.client, sid, turnId);
+      assert.equal(release.ok, true, `release ${i + 1} should succeed`);
     }
 
     assert.equal((await readSession(alice.client, sid)).data!.model_calls_used, 8);
 
-    // The ninth must be refused.
-    const overflow = await appendTurn(alice.client, sid, "One more explanation.");
-    const refused = await claimCall(alice.client, sid, overflow.turnId);
+    const refused = await claimCall(alice.client, sid, turnId);
     assert.equal(refused.ok, false, "claim at the cap must be refused");
     assert.match(refused.error ?? "", /cap reached/i);
 
