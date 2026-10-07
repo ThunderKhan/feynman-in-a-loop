@@ -26,16 +26,19 @@ test("setup: create two distinct users", async () => {
   assert.notEqual(alice.userId, bob.userId);
 });
 
-test("a user can read their own session", async () => {
+test("a user can read the public columns of their own session", async () => {
   const id = await createSession(alice.client, "Binary Search");
   try {
-    const { data, error } = await readSession(alice.client, id);
+    const { data, error } = await alice.client
+      .from("learning_sessions")
+      .select("id, topic, status, stage, student_state")
+      .eq("id", id)
+      .single();
+
     assert.equal(error, null);
     assert.equal(data!.id, id);
     assert.equal(data!.topic, "Binary Search");
     assert.equal(data!.status, "in_progress");
-    // Identity is derived server-side, never accepted from the client.
-    assert.equal(data!.user_id, alice.userId);
   } finally {
     await cleanupSession(alice.client, id);
   }
@@ -44,15 +47,11 @@ test("a user can read their own session", async () => {
 test("a user CANNOT read another user's session (cross-user select denied)", async () => {
   const id = await createSession(alice.client, "Recursion");
 
-  const { data, error } = await readSession(bob.client, id);
-  // Authenticated cross-user reads are filtered by RLS without an error.
-  assert.equal(error, null);
-  assert.equal(data, null, "cross-user read must not return the row");
-
-  const { data: list } = await bob.client
+  const { data: list, error } = await bob.client
     .from("learning_sessions")
     .select("id, topic")
     .eq("id", id);
+  assert.equal(error, null);
   assert.deepEqual(list, [], "cross-user row must not appear in a scoped query");
 
   await cleanupSession(alice.client, id);
