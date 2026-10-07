@@ -2,7 +2,7 @@
 doc: spec
 status: approved
 approved: 2026-10-07
-revision: 3
+revision: 4
 ---
 
 # Feynman-in-a-Loop — Technical Spec
@@ -293,6 +293,8 @@ Three independent gates. *Provider enforces shape; application enforces meaning 
 
 Included every request: topic, current stage, mastery dimension states, unresolved target gap, **anchor** (first learner explanation, permanent for the session), turns connected to the active gap and its correction, most recent student question, most recent 1–2 learner turns, and the accumulated evidence ledger.
 
+The unresolved target gap is persisted as private `learning_sessions.active_target_gap` so bounded contexts do not lose diagnostic continuity. It is never part of the turn endpoint's public response and is not selectable by the authenticated browser role.
+
 Excluded: the full transcript. Full turns stay persisted for history and auditability; they simply aren't resent. If validation needs a specific older turn, the selector includes that turn by id rather than widening the window by default.
 
 ### Evidence Ledger (`lib/ai/evidence.ts`)
@@ -329,6 +331,8 @@ The database has **two mutation classes**.
 **Evaluator/quota mutations** — `claim_model_call`, `release_model_call`, `apply_turn_result`, and the stale-window test hook — are **server-only**. They are `SECURITY INVOKER` functions executable only by `service_role`; the browser's `authenticated` role has no EXECUTE privilege on them. The Next.js route first verifies the user's JWT with the normal SSR client, then uses the server-only Supabase secret key and passes the already-verified user id. Each RPC still compares that id with row ownership before mutating.
 
 This split is deliberate: RLS protects browser reads, but RLS cannot distinguish "the same authenticated user's browser" from "the Next.js server acting with that user's JWT." Without a server-only credential, a user could invoke `apply_turn_result` directly and forge authoritative learning state.
+
+**Revision 4 private-state boundary.** RLS protects rows, not columns. Browser-facing `authenticated` therefore does **not** receive table-wide SELECT on either table. It receives a column-level public projection only. On `learning_sessions`, private evaluator/quota fields such as `mastery`, `evidence_ledger`, `model_calls_used`, claim timing, and `active_target_gap` are server-only during the attempt; `mastery_result` is the explicit public result artifact. On `session_turns`, evaluation lifecycle fields and `client_turn_id` remain private while transcript fields are readable. The turn route reads private state through the server-only Supabase client after verifying the user's JWT and re-applying ownership explicitly.
 
 #### 1. `claim_model_call(user_id, session_id, learner_turn_id)`
 
@@ -368,7 +372,7 @@ learner turn persisted → Groq succeeds → apply_turn_result succeeds
 
 On retry with the same `clientTurnId`:
 
-1. find the existing learner turn;
+1. find the existing learner turn **before rejecting a completed parent**, so a lost response from the final successful turn can still be replayed after completion;
 2. if it already has an applied student response or result, **return that existing result** — do not call Groq again, do not append another student turn;
 3. if it was persisted but evaluation never completed, resume evaluation of that turn;
 4. never insert a duplicate learner turn;
@@ -667,6 +671,13 @@ feynman-in-a-loop/
 ---
 
 ## Decisions and Open Issues
+
+### Revision 4 — private evaluator columns and final-turn replay
+
+Slice 3 implementation exposed two database-level details that the earlier spec left implicit:
+
+- private evaluator/quota state cannot share a table-wide browser SELECT grant simply because RLS protects the row; column-level grants now keep that state server-only;
+- `append_learner_turn` checks an existing idempotency key before the completed-session guard, so retrying the exact final request after a lost HTTP response returns the original learner turn instead of failing as a "new" write. Reusing that key with different content/source is rejected.
 
 ### Decisions made here
 
