@@ -4,14 +4,6 @@ import { useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
-const learningLoop = [
-  "Learn",
-  "Explain",
-  "Challenge",
-  "Repair",
-  "Transfer",
-] as const;
-
 type AuthShellProps = {
   mode: "login" | "signup";
   artworkSrc: string;
@@ -29,64 +21,6 @@ export function AuthShell({
 }: AuthShellProps) {
   const [resolvedArtworkSrc, setResolvedArtworkSrc] = useState(artworkSrc);
   const isSignup = mode === "signup";
-
-  const formColumn = (
-    <section
-      className={
-        isSignup
-          ? "lg:col-span-5 lg:col-start-1"
-          : "lg:col-span-5 lg:col-start-8"
-      }
-    >
-      <div className="mx-auto w-full max-w-[420px]">{children}</div>
-    </section>
-  );
-
-  const artworkColumn = (
-    <section
-      className={
-        isSignup
-          ? "lg:col-span-7 lg:col-start-6"
-          : "lg:col-span-7 lg:col-start-1 lg:row-start-1"
-      }
-    >
-      <div className="rounded-2xl border border-[#e5e7eb] bg-[#f5f5f5] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <div className="relative min-h-[300px] overflow-hidden rounded-xl bg-[#101010] sm:min-h-[380px] lg:min-h-[540px]">
-          <Image
-            src={resolvedArtworkSrc}
-            alt={artworkAlt}
-            fill
-            priority
-            sizes="(max-width: 1023px) 100vw, 58vw"
-            className="object-cover object-center"
-            onError={() => setResolvedArtworkSrc(artworkFallback)}
-          />
-        </div>
-
-        {isSignup ? (
-          <div className="mt-3 rounded-full bg-[#f8f9fa] p-1.5">
-            <ol
-              aria-label="Feynman learning loop"
-              className="grid grid-cols-5 gap-1"
-            >
-              {learningLoop.map((step, index) => (
-                <li
-                  key={step}
-                  className={
-                    index === 0
-                      ? "rounded-lg bg-white px-2 py-2 text-center text-[11px] font-medium text-[#111111] shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
-                      : "rounded-lg px-2 py-2 text-center text-[11px] font-medium text-[#6b7280]"
-                  }
-                >
-                  {step}
-                </li>
-              ))}
-            </ol>
-          </div>
-        ) : null}
-      </div>
-    </section>
-  );
 
   return (
     <main
@@ -130,9 +64,34 @@ export function AuthShell({
         </div>
       </header>
 
-      <div className="mx-auto grid min-h-[calc(100dvh-64px)] w-full max-w-[1200px] grid-cols-1 items-center gap-10 px-6 py-10 md:px-8 lg:grid-cols-12 lg:gap-12 lg:py-12">
-        {formColumn}
-        {artworkColumn}
+      <div className="grid min-h-[calc(100dvh-64px)] grid-cols-1 lg:grid-cols-2">
+        <section
+          className={
+            isSignup
+              ? "flex items-center justify-center px-6 py-12 sm:px-10 lg:order-1 lg:px-14 xl:px-20"
+              : "flex items-center justify-center px-6 py-12 sm:px-10 lg:order-2 lg:px-14 xl:px-20"
+          }
+        >
+          <div className="w-full max-w-[420px]">{children}</div>
+        </section>
+
+        <section
+          className={
+            isSignup
+              ? "relative min-h-[360px] overflow-hidden bg-[#101010] lg:order-2 lg:min-h-[calc(100dvh-64px)]"
+              : "relative min-h-[360px] overflow-hidden bg-[#101010] lg:order-1 lg:min-h-[calc(100dvh-64px)]"
+          }
+        >
+          <Image
+            src={resolvedArtworkSrc}
+            alt={artworkAlt}
+            fill
+            priority
+            sizes="(max-width: 1023px) 100vw, 50vw"
+            className="object-cover object-center"
+            onError={() => setResolvedArtworkSrc(artworkFallback)}
+          />
+        </section>
       </div>
     </main>
   );
