@@ -324,7 +324,7 @@ Owns the full ordered flow in **The Core Journey** step 5, including learner-tur
 
 The database has **two mutation classes**.
 
-**User-originated mutations** — `create_session`, `delete_session`, and `append_learner_turn` — are narrow `SECURITY DEFINER` RPCs executable by `authenticated`. Direct INSERT/UPDATE/DELETE privileges on the tables remain revoked. These functions derive identity from `auth.uid()`, perform ownership/state checks, and pin `search_path`.
+**User-originated mutations** — `create_session` and `append_learner_turn` — are narrow `SECURITY DEFINER` RPCs executable by `authenticated`. Direct INSERT/UPDATE/DELETE privileges on the tables remain revoked. These functions derive identity from `auth.uid()`, perform ownership/state checks, and pin `search_path`.
 
 **Evaluator/quota mutations** — `claim_model_call`, `release_model_call`, `apply_turn_result`, and the stale-window test hook — are **server-only**. They are `SECURITY INVOKER` functions executable only by `service_role`; the browser's `authenticated` role has no EXECUTE privilege on them. The Next.js route first verifies the user's JWT with the normal SSR client, then uses the server-only Supabase secret key and passes the already-verified user id. Each RPC still compares that id with row ownership before mutating.
 
