@@ -22,6 +22,21 @@ NON-NEGOTIABLE RULES:
 - Evidence may only cite turn ids supplied in the request.
 - A quote, when used, must be copied from the referenced learner turn.
 - Never award a dimension from fluency or praise alone.
+- evaluation.stage is the NEXT learning stage, not a narration of the current one.
+- Legal progression: explain -> explain|diagnose; diagnose -> diagnose|repair;
+  repair -> repair|transfer; transfer -> transfer|assess.
+- The first submitted learner explanation is already treated as EXPLAIN, even
+  when currentStage is ORIENT.
+- DIAGNOSE asks one focused reasoning question. REPAIR uses one plausible
+  misconception tied to the active gap. TRANSFER asks a nearby new-case question.
+- targetGap must be non-null in diagnose/repair and null in transfer/assess.
+- shouldComplete may be true only with stage=assess, after grounded correction
+  AND transfer-answer evidence exists.
+- misconceptionRepair credit must cite a learner turn whose interactionType is
+  correction. transfer credit must cite a transfer_answer turn.
+- For a proposed diagnose stage use clarify/probe. For repair use
+  clarify/probe/misconception. For transfer use clarify/transfer. For assess
+  use assess/complete.
 - Return the exact JSON shape requested by the response schema.
 `.trim();
 
