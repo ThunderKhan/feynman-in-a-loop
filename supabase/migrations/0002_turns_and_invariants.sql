@@ -13,20 +13,23 @@
 -- evidence rules entirely.
 --
 -- Final rule:
---   > The authenticated client may READ its own data. Authoritative learning
---   > and evaluation state may only change through the approved RPCs.
+--   > The authenticated client may READ its own data. User-originated writes
+--   > go through narrow ownership-checking RPCs; evaluator/quota state is
+--   > server-only and cannot be forged from the browser.
 --
 -- Therefore:
 --   * authenticated gets SELECT only on both tables. No INSERT/UPDATE/DELETE.
---   * Every mutation goes through a SECURITY DEFINER function that performs its
---     own ownership check.
+--   * create_session / delete_session / append_learner_turn are the only
+--     authenticated mutation RPCs; they derive identity from auth.uid().
+--   * claim/release/apply and the stale-window test hook are executable only
+--     by service_role (the server-only Supabase secret key path) and take the
+--     already-verified user id explicitly.
 --   * RLS stays enabled for defence in depth on the read path.
 --
--- SECURITY DEFINER is justified HERE SPECIFICALLY because direct table
--- mutation privileges are removed. It is not a workaround for RLS: every
--- definer function independently verifies auth.uid(), derives identity from
--- auth.uid() (never from a caller-supplied user_id), checks ownership, pins
--- search_path, validates current state, and is granted only to `authenticated`.
+-- SECURITY DEFINER is used only for the narrow authenticated RPCs that need
+-- table write access after direct table mutations are revoked. Server-only
+-- evaluator RPCs are SECURITY INVOKER and rely on service_role privileges,
+-- while still checking the supplied verified user id against row ownership.
 --
 -- Note on 0001: it created broad insert/update/delete policies on
 -- learning_sessions. Those are dropped below and the privileges revoked, so
@@ -131,6 +134,14 @@ create unique index session_turns_one_response_uidx
 drop index if exists public.session_turns_session_idx;
 create index session_turns_session_idx
   on public.session_turns (session_id, sequence);
+
+-- At most one learner evaluation may be in-flight per session. If a second
+-- claim races in, the unique violation rolls the whole claim transaction back,
+-- including the quota increment.
+drop index if exists public.session_turns_one_live_claim_uidx;
+create unique index session_turns_one_live_claim_uidx
+  on public.session_turns (session_id)
+  where role = 'learner' and evaluation_state = 'claimed';
 
 -- ---------------------------------------------------------------------------
 -- Table privileges: read-only for the authenticated client
@@ -243,9 +254,14 @@ as $ select make_interval(secs => 120); $;
 -- ===========================================================================
 -- MUTATION RPCs
 --
--- All SECURITY DEFINER, all with search_path pinned, all deriving identity
--- from auth.uid() and verifying ownership explicitly. Granted only to
--- `authenticated`.
+-- Browser-safe RPCs (create/delete/append) are SECURITY DEFINER because the
+-- authenticated role has no direct table write privileges. They derive
+-- identity from auth.uid() and verify ownership.
+--
+-- Evaluator/quota RPCs (set stale window, claim, release, apply) are
+-- SECURITY INVOKER and executable only by service_role. The Next.js server
+-- verifies the user's JWT first, then passes that verified user id. A browser
+-- session cannot call these functions directly.
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
@@ -320,6 +336,14 @@ begin
 end;
 $$;
 
+-- Remove legacy development signatures that were client-callable before the
+-- server-only evaluator boundary was made explicit. This keeps reruns from
+-- leaving an insecure overload behind.
+drop function if exists public.set_claim_stale_after(uuid, integer);
+drop function if exists public.claim_model_call(uuid, uuid);
+drop function if exists public.release_model_call(uuid, uuid);
+drop function if exists public.apply_turn_result(uuid, uuid, text, text, text, text, jsonb, jsonb, boolean, jsonb);
+
 -- ---------------------------------------------------------------------------
 -- set_claim_stale_after
 --
@@ -331,21 +355,21 @@ $$;
 -- to shorten the window on a live evaluation and steal its claim.
 -- ---------------------------------------------------------------------------
 create or replace function public.set_claim_stale_after(
+  p_user_id    uuid,
   p_session_id uuid,
-  p_seconds     integer
+  p_seconds    integer
 )
 returns integer
 language plpgsql
-security definer
+security invoker
 set search_path = ''
-as $$
+as $
 declare
-  v_user uuid := auth.uid();
   v_session public.learning_sessions%rowtype;
   v_turn_count integer;
 begin
-  if v_user is null then
-    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  if p_user_id is null then
+    raise exception 'verified user id is required' using errcode = 'insufficient_privilege';
   end if;
 
   if p_seconds < 1 or p_seconds > 600 then
@@ -361,7 +385,7 @@ begin
     raise exception 'session not found' using errcode = 'no_data_found';
   end if;
 
-  if v_session.user_id <> v_user then
+  if v_session.user_id <> p_user_id then
     raise exception 'not your session' using errcode = 'insufficient_privilege';
   end if;
 
@@ -409,11 +433,10 @@ create or replace function public.append_learner_turn(
 )
 returns uuid
 language plpgsql
-security definer
+security invoker
 set search_path = ''
-as $$
+as $
 declare
-  v_user uuid := auth.uid();
   v_session public.learning_sessions%rowtype;
   v_existing uuid;
   v_turn_id uuid;
@@ -435,7 +458,7 @@ begin
     raise exception 'session not found' using errcode = 'no_data_found';
   end if;
 
-  if v_session.user_id <> v_user then
+  if v_session.user_id <> p_user_id then
     raise exception 'not your session' using errcode = 'insufficient_privilege';
   end if;
 
@@ -501,23 +524,23 @@ $$;
 -- neither, so a finished evaluation is never re-run.
 -- ---------------------------------------------------------------------------
 create or replace function public.claim_model_call(
+  p_user_id         uuid,
   p_session_id      uuid,
   p_learner_turn_id uuid
 )
 returns boolean
 language plpgsql
-security definer
+security invoker
 set search_path = ''
-as $$
+as $
 declare
-  v_user uuid := auth.uid();
   v_max integer := public.max_model_calls();
   v_session public.learning_sessions%rowtype;
   v_stale interval;
   v_updated integer;
 begin
-  if v_user is null then
-    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  if p_user_id is null then
+    raise exception 'verified user id is required' using errcode = 'insufficient_privilege';
   end if;
 
   select * into v_session
@@ -528,7 +551,7 @@ begin
     raise exception 'session not found' using errcode = 'no_data_found';
   end if;
 
-  if v_session.user_id <> v_user then
+  if v_session.user_id <> p_user_id then
     raise exception 'not your session' using errcode = 'insufficient_privilege';
   end if;
 
@@ -542,7 +565,7 @@ begin
   update public.learning_sessions s
      set model_calls_used = s.model_calls_used + 1
    where s.id = p_session_id
-     and s.user_id = v_user
+     and s.user_id = p_user_id
      and s.status = 'in_progress'
      and s.model_calls_used < v_max;
 
@@ -590,21 +613,21 @@ $$;
 -- fresh claim and consumes a further allowance.
 -- ---------------------------------------------------------------------------
 create or replace function public.release_model_call(
+  p_user_id         uuid,
   p_session_id      uuid,
   p_learner_turn_id uuid
 )
 returns boolean
 language plpgsql
-security definer
+security invoker
 set search_path = ''
-as $$
+as $
 declare
-  v_user uuid := auth.uid();
   v_session public.learning_sessions%rowtype;
   v_updated integer;
 begin
-  if v_user is null then
-    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  if p_user_id is null then
+    raise exception 'verified user id is required' using errcode = 'insufficient_privilege';
   end if;
 
   select * into v_session
@@ -616,7 +639,7 @@ begin
     raise exception 'session not found' using errcode = 'no_data_found';
   end if;
 
-  if v_session.user_id <> v_user then
+  if v_session.user_id <> p_user_id then
     raise exception 'not your session' using errcode = 'insufficient_privilege';
   end if;
 
@@ -658,6 +681,7 @@ $$;
 -- target gap.
 -- ---------------------------------------------------------------------------
 create or replace function public.apply_turn_result(
+  p_user_id           uuid,
   p_session_id        uuid,
   p_learner_turn_id   uuid,
   p_student_state     text,
@@ -680,8 +704,8 @@ declare
   v_sequence integer;
   v_state text;
 begin
-  if v_user is null then
-    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  if p_user_id is null then
+    raise exception 'verified user id is required' using errcode = 'insufficient_privilege';
   end if;
 
   select * into v_session
@@ -735,7 +759,7 @@ begin
     session_id, user_id, responds_to_turn_id, sequence, role,
     interaction_type, source, content
   ) values (
-    p_session_id, v_user, p_learner_turn_id, v_sequence, 'student',
+    p_session_id, p_user_id, p_learner_turn_id, v_sequence, 'student',
     p_interaction_type, 'voice', p_message
   );
 
@@ -766,28 +790,33 @@ $$;
 -- ---------------------------------------------------------------------------
 -- Grants
 --
--- EXECUTE is revoked from PUBLIC/anon first, then granted only to
--- `authenticated`. No function is exposed to an unauthenticated caller.
+-- PUBLIC/anon get no mutation RPCs.
+-- authenticated may create/delete sessions and append its own learner turns.
+-- Evaluator/quota mutations are server-only: service_role must be used after
+-- the Next.js server verifies the user's JWT and supplies p_user_id.
 -- ---------------------------------------------------------------------------
-revoke execute on function public.create_session(text) from public;
-revoke execute on function public.delete_session(uuid) from public;
-revoke execute on function public.set_claim_stale_after(uuid, integer) from public;
-revoke execute on function public.append_learner_turn(uuid, uuid, text, text) from public;
-revoke execute on function public.claim_model_call(uuid, uuid) from public;
-revoke execute on function public.release_model_call(uuid, uuid) from public;
-revoke execute on function public.apply_turn_result(uuid, uuid, text, text, text, text, jsonb, jsonb, boolean, jsonb) from public;
-revoke execute on function public.max_model_calls() from public;
-revoke execute on function public.claim_stale_after() from public;
+revoke execute on function public.create_session(text) from public, anon;
+revoke execute on function public.delete_session(uuid) from public, anon;
+revoke execute on function public.append_learner_turn(uuid, uuid, text, text) from public, anon;
 
 grant execute on function public.create_session(text) to authenticated;
 grant execute on function public.delete_session(uuid) to authenticated;
-grant execute on function public.set_claim_stale_after(uuid, integer) to authenticated;
 grant execute on function public.append_learner_turn(uuid, uuid, text, text) to authenticated;
-grant execute on function public.claim_model_call(uuid, uuid) to authenticated;
-grant execute on function public.release_model_call(uuid, uuid) to authenticated;
-grant execute on function public.apply_turn_result(uuid, uuid, text, text, text, text, jsonb, jsonb, boolean, jsonb) to authenticated;
-grant execute on function public.max_model_calls() to authenticated;
-grant execute on function public.claim_stale_after() to authenticated;
+
+revoke execute on function public.set_claim_stale_after(uuid, uuid, integer) from public, anon, authenticated;
+revoke execute on function public.claim_model_call(uuid, uuid, uuid) from public, anon, authenticated;
+revoke execute on function public.release_model_call(uuid, uuid, uuid) from public, anon, authenticated;
+revoke execute on function public.apply_turn_result(uuid, uuid, uuid, text, text, text, text, jsonb, jsonb, boolean, jsonb) from public, anon, authenticated;
+
+grant execute on function public.set_claim_stale_after(uuid, uuid, integer) to service_role;
+grant execute on function public.claim_model_call(uuid, uuid, uuid) to service_role;
+grant execute on function public.release_model_call(uuid, uuid, uuid) to service_role;
+grant execute on function public.apply_turn_result(uuid, uuid, uuid, text, text, text, text, jsonb, jsonb, boolean, jsonb) to service_role;
+
+revoke execute on function public.max_model_calls() from public, anon;
+revoke execute on function public.claim_stale_after() from public, anon;
+grant execute on function public.max_model_calls() to authenticated, service_role;
+grant execute on function public.claim_stale_after() to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- Everything above this line is owned by 0001 (set_updated_at) or 0002.
