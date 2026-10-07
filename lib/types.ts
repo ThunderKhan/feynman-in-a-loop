@@ -36,7 +36,9 @@ export type LearningSession = {
   stage: Stage;
   student_state: StudentState | null;
   model_calls_used: number;
-  mastery: MasteryDimensions | null;
+  mastery: MasteryDimensions | Record<string, never> | null;
+  evidence_ledger: unknown;
+  active_target_gap: string | null;
   mastery_result: unknown;
   created_at: string;
   completed_at: string | null;
