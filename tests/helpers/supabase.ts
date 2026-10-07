@@ -146,13 +146,48 @@ export async function signIn(email: string, password: string): Promise<SupabaseC
 }
 
 export async function createSession(client: SupabaseClient, topic: string) {
-  const { data, error } = await client
-    .from("learning_sessions")
-    .insert({ topic })
-    .select("id")
-    .single();
+  const { data, error } = await client.rpc("create_session", { p_topic: topic });
   if (error) throw new Error(`createSession failed: ${error.message}`);
-  return data.id as string;
+  return data as string;
+}
+
+/** Owner-only delete, used for test cleanup. */
+export async function cleanupSession(client: SupabaseClient, sessionId: string) {
+  const { error } = await client.rpc("delete_session", { p_session_id: sessionId });
+  if (error) throw new Error(`cleanup failed: ${error.message}`);
+}
+
+/**
+ * Shortens this session's stale-claim window.
+ *
+ * Only permitted while the attempt is untouched (zero turns, zero consumed
+ * calls), so it cannot be used to steal a live claim. This is how the suite
+ * tests crash recovery without waiting out the production two-minute window,
+ * and it requires no special privilege.
+ */
+export async function setStaleWindow(
+  client: SupabaseClient,
+  sessionId: string,
+  seconds: number,
+) {
+  const { data, error } = await client.rpc("set_claim_stale_after", {
+    p_session_id: sessionId,
+    p_seconds: seconds,
+  });
+  return { ok: !error, error: error?.message ?? null, data };
+}
+
+/** The default stale-claim window in seconds. */
+export async function defaultStaleWindowSeconds(client: SupabaseClient) {
+  const { data } = await client.rpc("claim_stale_after");
+  const s = String(data);
+  const m = s.match(/(\d+):(\d+):(\d+)/);
+  if (!m) return null;
+  return Number(m[2]) * 60 + Number(m[3]);
+}
+
+export async function waitMs(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export const clientTurnId = () => randomUUID();
@@ -178,8 +213,9 @@ export async function assertSchemaReady(client: SupabaseClient) {
 }
 
 /** Best-effort cleanup of a session created by a test. */
-export async function cleanupSession(client: SupabaseClient, sessionId: string) {
-  await client.from("learning_sessions").delete().eq("id", sessionId);
+export async function removeSessionAnyWay(client: SupabaseClient, sessionId: string) {
+  const { error } = await client.rpc("delete_session", { p_session_id: sessionId });
+  return { ok: !error, error: error?.message ?? null };
 }
 
 /** Appends a learner turn via the idempotent RPC and returns its id. */
@@ -230,33 +266,9 @@ export async function releaseCall(
   return { ok: !error, error: error?.message ?? null, data };
 }
 
-/**
- * Backdates evaluation_claimed_at to simulate a process that died after
- * claiming and never released.
- *
- * Possible because RLS lets a user update their own turns; in the application
- * nothing does this. Worst a caller could achieve is wasting their own quota.
- */
-export async function backdateClaim(
-  client: SupabaseClient,
-  turnId: string,
-  minutesAgo = 10,
-) {
-  const { error } = await client
-    .from("session_turns")
-    .update({ evaluation_claimed_at: new Date(Date.now() - minutesAgo * 60_000).toISOString() })
-    .eq("id", turnId);
-  return { ok: !error, error: error?.message ?? null };
-}
-
 /** The configured stale-claim window, in seconds. */
 export async function staleWindowSeconds(client: SupabaseClient) {
-  const { data } = await client.rpc("claim_stale_after");
-  const interval = String(data);
-  const match = interval.match(/^00:0?2:00|(\d+):(\d+):(\d+)/);
-  if (!match) return null;
-  const [, , m, s] = match;
-  return Number(m ?? 0) * 60 + Number(s ?? 0);
+  return defaultStaleWindowSeconds(client);
 }
 
 export async function applyResult(

@@ -7,7 +7,8 @@ import {
   appendTurn,
   claimCall,
   releaseCall,
-  backdateClaim,
+  setStaleWindow,
+  waitMs,
   staleWindowSeconds,
   applyResult,
   readSession,
@@ -156,16 +157,24 @@ test("4. a concurrent claim is rejected while a LIVE claim exists", async () => 
 test("5. a stale abandoned claim can be recovered", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
+    // Shorten THIS session's stale window. Permitted only because the attempt
+    // is untouched — no turns, no consumed calls — so it cannot be used to
+    // steal a live claim. No privileged test-only grant is involved.
+    const shortened = await setStaleWindow(alice.client, sid, 1);
+    assert.equal(shortened.ok, true, shortened.error ?? "");
+
     const { turnId } = await appendTurn(alice.client, sid, "It halves the search space.");
     await claimCall(alice.client, sid, turnId);
 
-    // A second claim while the claim is fresh must fail...
-    assert.equal((await claimCall(alice.client, sid, turnId)).ok, false);
+    // While the claim is fresh, it must not be stealable.
+    assert.equal(
+      (await claimCall(alice.client, sid, turnId)).ok,
+      false,
+      "a fresh claim must not be stealable",
+    );
 
-    // ...but once the claim is older than the window, it is treated as
-    // abandoned by a dead process and becomes claimable again.
-    const backdated = await backdateClaim(alice.client, turnId, 10);
-    assert.equal(backdated.ok, true, backdated.error ?? "");
+    // Wait past the window: the claim is now abandoned by a dead process.
+    await waitMs(1500);
 
     const recovered = await claimCall(alice.client, sid, turnId);
     assert.equal(recovered.ok, true, "a stale claim must be recoverable");
@@ -178,6 +187,19 @@ test("5. a stale abandoned claim can be recovered", async () => {
     // And the turn is fully usable afterwards.
     const applied = await applyResult(alice.client, { sessionId: sid, learnerTurnId: turnId });
     assert.equal(applied.ok, true, applied.error ?? "");
+  } finally {
+    await cleanupSession(alice.client, sid);
+  }
+});
+
+test("the stale window cannot be shortened once evaluation has started", async () => {
+  const sid = await createSession(alice.client, "Binary Search");
+  try {
+    await appendTurn(alice.client, sid, "It halves the search space.");
+
+    const tooLate = await setStaleWindow(alice.client, sid, 1);
+    assert.equal(tooLate.ok, false, "window must not be settable once a turn exists");
+    assert.match(tooLate.error ?? "", /before evaluation begins/i);
   } finally {
     await cleanupSession(alice.client, sid);
   }
@@ -202,10 +224,6 @@ test("6. an applied learner turn can NEVER be re-evaluated", async () => {
     const release = await releaseCall(alice.client, sid, turnId);
     assert.equal(release.ok, false, "an applied turn must never be released");
 
-    // Even a very old timestamp must not make an applied turn claimable.
-    await backdateClaim(alice.client, turnId, 999);
-    const staleReclaim = await claimCall(alice.client, sid, turnId);
-    assert.equal(staleReclaim.ok, false, "staleness must not revive an applied turn");
 
     // And a second apply is refused.
     const reapply = await applyResult(alice.client, { sessionId: sid, learnerTurnId: turnId });

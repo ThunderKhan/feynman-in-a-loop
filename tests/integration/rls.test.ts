@@ -57,54 +57,55 @@ test("a user CANNOT read another user's session (cross-user select denied)", asy
   await cleanupSession(alice.client, id);
 });
 
-test("a user CANNOT update another user's session (cross-user update denied)", async () => {
+test("a session row cannot be updated by anyone, including its owner", async () => {
   const id = await createSession(alice.client, "Gradient Descent");
 
-  // NOTE: RLS filters rather than erroring. A policy mismatch means the row is
-  // invisible to the statement, so it updates zero rows and reports no error.
-  // The assertion must therefore be about the EFFECT, not the error.
   const { error } = await bob.client
     .from("learning_sessions")
     .update({ topic: "hijacked" })
     .eq("id", id);
-  if (error) {
-    // Some paths do report it; either behaviour is acceptable as long as the
-    // row is unchanged.
-  }
+  assert.ok(error, "direct update must be rejected");
 
   const { data } = await readSession(alice.client, id);
-  assert.ok(data, "row must still be readable by its owner");
-  assert.equal(data!.topic, "Gradient Descent", "row must be unchanged by a cross-user update");
-
+  assert.equal(data!.topic, "Gradient Descent", "row must be unchanged");
   await cleanupSession(alice.client, id);
 });
-
-test("a user CANNOT delete another user's session (cross-user delete denied)", async () => {
+test("a session cannot be deleted by another user, and not directly at all", async () => {
   const id = await createSession(alice.client, "Photosynthesis");
 
-  await bob.client.from("learning_sessions").delete().eq("id", id);
+  // Direct delete is blocked by privilege, so the row survives...
+  const direct = await bob.client.from("learning_sessions").delete().eq("id", id);
+  assert.ok(direct.error, "direct delete must be rejected");
+  assert.ok((await readSession(alice.client, id)).data, "row must still exist");
 
-  // The row must survive a cross-user delete.
-  const { data } = await readSession(alice.client, id);
-  assert.ok(data, "row must still exist after a cross-user delete attempt");
-  assert.equal(data!.id, id);
+  // ...and the authorized RPC refuses cross-user deletion.
+  const cross = await bob.client.rpc("delete_session", { p_session_id: id });
+  assert.ok(cross.error, "cross-user delete must be refused");
+  assert.ok((await readSession(alice.client, id)).data, "row must still exist");
 
   await cleanupSession(alice.client, id);
 });
-
-test("a user CANNOT insert a session owned by someone else", async () => {
-  // user_id defaults to auth.uid(), and the INSERT policy checks auth.uid() =
-  // user_id, so supplying someone else's id must fail.
-  const { data, error } = await bob.client
+test("a session can only be created through create_session, which derives the owner", async () => {
+  // The client has no INSERT privilege, so ownership cannot be forged by
+  // supplying a user_id. Creation goes through the RPC, which takes only a
+  // topic and sets user_id from auth.uid().
+  const { data, error } = await alice.client
     .from("learning_sessions")
-    .insert({ topic: "forged", user_id: alice.userId })
+    .insert({ topic: "forged", user_id: bob.userId })
     .select("id")
     .single();
 
-  assert.ok(error, "inserting a row for another user must be rejected");
+  assert.ok(error, "direct insert must be rejected");
   assert.equal(data, null);
-});
 
+  // The authorized path yields a session owned by the caller.
+  const id = await createSession(alice.client, "Binary Search");
+  try {
+    assert.equal((await readSession(alice.client, id)).data!.user_id, alice.userId);
+  } finally {
+    await cleanupSession(alice.client, id);
+  }
+});
 test("an anonymous client cannot read user-owned rows", async () => {
   const id = await createSession(alice.client, "Binary Search");
 

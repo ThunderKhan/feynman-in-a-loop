@@ -37,16 +37,18 @@ export async function createSession(
     return { error: "Your session expired. Sign in again." };
   }
 
-  const { data, error } = await supabase
-    .from("learning_sessions")
-    .insert({ topic })
-    .select("id")
-    .single();
+  // Sessions are created through an RPC, not a direct insert: the client has
+  // no INSERT privilege on learning_sessions, so authoritative rows can only
+  // come into existence through an authorized path. See
+  // supabase/migrations/0002_turns_and_invariants.sql > PRIVILEGE MODEL.
+  const { data, error } = await supabase.rpc("create_session", {
+    p_topic: topic,
+  });
 
   if (error) {
     return { error: error.message };
   }
 
   revalidatePath("/teach");
-  redirect(`/teach/${data.id}`);
+  redirect(`/teach/${data as string}`);
 }

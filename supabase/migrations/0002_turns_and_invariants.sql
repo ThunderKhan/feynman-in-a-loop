@@ -1,17 +1,52 @@
 -- 0002_turns_and_invariants.sql — Feynman-in-a-Loop, slice 2
 --
--- Adds session_turns, the completed-attempt immutability guards, and the three
--- atomic RPCs the turn pipeline depends on:
+-- PRIVILEGE MODEL (the important part of this file)
 --
---   append_learner_turn()  idempotent insert; server derives interaction_type
---   claim_model_call()     consumes quota BEFORE any provider invocation
---   apply_turn_result()    atomic student response + evaluator state
+--   RLS answers "which ROWS may a user touch".
+--   It does NOT protect authoritative COLUMNS on those rows.
 --
--- All three are SECURITY INVOKER: they run with the calling user's privileges,
--- so RLS remains the authorization boundary and none of them is a privileged
--- backdoor. No service-role key is involved anywhere.
+-- Supabase grants ALL on public tables to `anon` and `authenticated` by
+-- default, so before this migration an authenticated user could, with a plain
+-- PostgREST call, reset model_calls_used, rewrite stage/mastery, flip status to
+-- complete or back to in_progress, fabricate a student turn, or reset
+-- evaluation_state — bypassing the state machine, the quota cap, and the
+-- evidence rules entirely.
 --
--- See devpost/spec.md > Database Operations and > Data Model.
+-- Final rule:
+--   > The authenticated client may READ its own data. Authoritative learning
+--   > and evaluation state may only change through the approved RPCs.
+--
+-- Therefore:
+--   * authenticated gets SELECT only on both tables. No INSERT/UPDATE/DELETE.
+--   * Every mutation goes through a SECURITY DEFINER function that performs its
+--     own ownership check.
+--   * RLS stays enabled for defence in depth on the read path.
+--
+-- SECURITY DEFINER is justified HERE SPECIFICALLY because direct table
+-- mutation privileges are removed. It is not a workaround for RLS: every
+-- definer function independently verifies auth.uid(), derives identity from
+-- auth.uid() (never from a caller-supplied user_id), checks ownership, pins
+-- search_path, validates current state, and is granted only to `authenticated`.
+--
+-- Note on 0001: it created broad insert/update/delete policies on
+-- learning_sessions. Those are dropped below and the privileges revoked, so
+-- they are inert. 0001 is left byte-identical because it is already applied to
+-- the live project; this migration is what closes the hole on both a fresh
+-- database and the existing one.
+--
+-- See devpost/spec.md > Database Operations, > Data Model, > Security.
+
+-- ---------------------------------------------------------------------------
+-- Stale-claim window (per session, default 120s)
+-- ---------------------------------------------------------------------------
+alter table public.learning_sessions
+  add column if not exists claim_stale_after_seconds integer not null default 120;
+
+alter table public.learning_sessions
+  drop constraint if exists claim_stale_after_range;
+alter table public.learning_sessions
+  add constraint claim_stale_after_range
+  check (claim_stale_after_seconds between 1 and 600);
 
 -- ---------------------------------------------------------------------------
 -- session_turns
@@ -60,7 +95,7 @@ create table if not exists public.session_turns (
 );
 
 comment on table public.session_turns is
-  'Immutable transcript turns. Learner turns are the evidence; student turns answer them.';
+  'Transcript turns. Learner turns are the evidence; student turns answer them.';
 
 -- One row per turn position within a session.
 create unique index if not exists session_turns_session_sequence_uidx
@@ -80,36 +115,47 @@ create index if not exists session_turns_session_idx
   on public.session_turns (session_id, sequence);
 
 -- ---------------------------------------------------------------------------
--- Row Level Security on session_turns
+-- Table privileges: read-only for the authenticated client
+--
+-- This is the enforcement point. Mutation policies without these revokes would
+-- be meaningless, because the privilege itself is what allows the write.
 -- ---------------------------------------------------------------------------
+revoke all on table public.learning_sessions from anon;
+revoke all on table public.learning_sessions from authenticated;
+
+revoke all on table public.session_turns from anon;
+revoke all on table public.session_turns from authenticated;
+
+-- Reads only, still narrowed by RLS to the caller's own rows.
+grant select on table public.learning_sessions to authenticated;
+grant select on table public.session_turns to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- RLS: read path only
+-- ---------------------------------------------------------------------------
+alter table public.learning_sessions enable row level security;
 alter table public.session_turns enable row level security;
+
+-- Drop 0001's broad mutation policies: with privileges revoked they are inert,
+-- and removing them stops them being mistaken for the security boundary.
+drop policy if exists "sessions_insert_own" on public.learning_sessions;
+drop policy if exists "sessions_update_own_not_completed" on public.learning_sessions;
+drop policy if exists "sessions_delete_own" on public.learning_sessions;
+
+create policy "sessions_select_own"
+  on public.learning_sessions for select
+  using (auth.uid() = user_id);
 
 create policy "turns_select_own"
   on public.session_turns for select
   using (auth.uid() = user_id);
 
-create policy "turns_insert_own"
-  on public.session_turns for insert
-  with check (auth.uid() = user_id);
-
-create policy "turns_update_own"
-  on public.session_turns for update
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-
-create policy "turns_delete_own"
-  on public.session_turns for delete
-  using (auth.uid() = user_id);
-
 -- ---------------------------------------------------------------------------
--- Immutability — layer 2 and 3 of three
+-- Immutability — defence in depth
 --
--- Layer 1 is the RLS policy on learning_sessions, which refuses updates to a
--- completed session. These triggers are what make the guarantee hold through
--- ANY database path, including a direct PostgREST call from the browser.
+-- Enforced inside the definer functions (apply_turn_result refuses a completed
+-- session) and here, so the guarantee survives any future code path.
 -- ---------------------------------------------------------------------------
-
--- A completed attempt is frozen. Any UPDATE at all is refused.
 create or replace function public.guard_completed_session_update()
 returns trigger
 language plpgsql
@@ -130,7 +176,6 @@ create trigger learning_sessions_freeze_completed
   before update on public.learning_sessions
   for each row execute function public.guard_completed_session_update();
 
--- A completed attempt accepts no new turn, by any path.
 create or replace function public.guard_turn_insert_for_completed_session()
 returns trigger
 language plpgsql
@@ -157,55 +202,171 @@ create trigger session_turns_reject_completed_parent
   before insert on public.session_turns
   for each row execute function public.guard_turn_insert_for_completed_session();
 
--- ---------------------------------------------------------------------------
--- Hard limit for AI evaluations per attempt.
---
--- Deliberately close to the ~5–7 calls a normal session needs. The product's own
--- guardrail prevents endless tutoring, so the quota defense should agree.
--- ---------------------------------------------------------------------------
 create or replace function public.max_model_calls()
 returns integer
-language sql
-stable
-security invoker
+language sql stable security invoker set search_path = ''
+as $$ select 8; $$;
+
+-- ===========================================================================
+-- MUTATION RPCs
+--
+-- All SECURITY DEFINER, all with search_path pinned, all deriving identity
+-- from auth.uid() and verifying ownership explicitly. Granted only to
+-- `authenticated`.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- create_session
+--
+-- Session creation goes through here so the client never needs INSERT.
+-- ---------------------------------------------------------------------------
+create or replace function public.create_session(p_topic text)
+returns uuid
+language plpgsql
+security definer
 set search_path = ''
 as $$
-  select 8;
+declare
+  v_user uuid := auth.uid();
+  v_topic text := btrim(coalesce(p_topic, ''));
+  v_id uuid;
+begin
+  if v_user is null then
+    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  end if;
+
+  if char_length(v_topic) = 0 then
+    raise exception 'topic is required' using errcode = 'check_violation';
+  end if;
+
+  if char_length(v_topic) > 120 then
+    raise exception 'topic too long' using errcode = 'check_violation';
+  end if;
+
+  -- user_id comes from auth.uid(), never from the caller.
+  insert into public.learning_sessions (topic, user_id)
+  values (v_topic, v_user)
+  returning id into v_id;
+
+  return v_id;
+end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Stale-claim window.
+-- delete_session
 --
--- A server process can die after claiming a turn but before releasing it. That
--- turn would otherwise be stuck in 'claimed' forever, and the concurrency
--- guard would read the dead claim as "evaluation still in flight".
---
--- A claim older than this window is considered abandoned and may be stolen.
--- The window must comfortably exceed a slow provider call so a genuinely
--- in-flight evaluation is never mistaken for a dead one. Trade-off: a call
--- that outlives the window can be evaluated twice, which costs quota — but the
--- unique index on responds_to_turn_id still guarantees exactly one applied
--- student response per learner turn.
+-- Owner-only deletion. Exists so the integration suite can clean up after
+-- itself, and as a reasonable future affordance for a learner removing their
+-- own attempt.
 -- ---------------------------------------------------------------------------
-create or replace function public.claim_stale_after()
-returns interval
-language sql
-stable
-security invoker
+create or replace function public.delete_session(p_session_id uuid)
+returns boolean
+language plpgsql
+security definer
 set search_path = ''
 as $$
-  select interval '2 minutes';
+declare
+  v_user uuid := auth.uid();
+  v_deleted integer;
+begin
+  if v_user is null then
+    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  end if;
+
+  delete from public.learning_sessions s
+   where s.id = p_session_id
+     and s.user_id = v_user;
+
+  get diagnostics v_deleted = row_count;
+
+  if v_deleted = 0 then
+    raise exception 'session not found or not yours' using errcode = 'no_data_found';
+  end if;
+
+  return true;
+end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 1. append_learner_turn
+-- set_claim_stale_after
+--
+-- Per-session override for the stale-claim window, used by the integration
+-- suite to exercise crash recovery without a two-minute wait.
+--
+-- Provably safe in production: it can only be set while the attempt is
+-- untouched — zero turns and zero consumed calls. It therefore cannot be used
+-- to shorten the window on a live evaluation and steal its claim.
+-- ---------------------------------------------------------------------------
+create or replace function public.set_claim_stale_after(
+  p_session_id uuid,
+  p_seconds     integer
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user uuid := auth.uid();
+  v_session public.learning_sessions%rowtype;
+  v_turn_count integer;
+begin
+  if v_user is null then
+    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  end if;
+
+  if p_seconds < 1 or p_seconds > 600 then
+    raise exception 'stale window must be between 1 and 600 seconds'
+      using errcode = 'check_violation';
+  end if;
+
+  select * into v_session
+    from public.learning_sessions s
+   where s.id = p_session_id;
+
+  if not found then
+    raise exception 'session not found' using errcode = 'no_data_found';
+  end if;
+
+  if v_session.user_id <> v_user then
+    raise exception 'not your session' using errcode = 'insufficient_privilege';
+  end if;
+
+  if v_session.status <> 'in_progress' then
+    raise exception 'session is completed' using errcode = 'check_violation';
+  end if;
+
+  -- Only before any evaluation has started.
+  if v_session.model_calls_used <> 0 then
+    raise exception 'stale window can only be set before evaluation begins'
+      using errcode = 'check_violation';
+  end if;
+
+  select count(*) into v_turn_count
+    from public.session_turns t
+   where t.session_id = p_session_id;
+
+  if v_turn_count > 0 then
+    raise exception 'stale window can only be set before evaluation begins'
+      using errcode = 'check_violation';
+  end if;
+
+  update public.learning_sessions s
+     set claim_stale_after_seconds = p_seconds
+   where s.id = p_session_id;
+
+  return p_seconds;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- append_learner_turn
 --
 -- Idempotent insert of a completed learner turn.
 --
--- SECURITY: the interaction_type is derived here from the authoritative
--- session stage. The client supplies only content, provenance, and an
--- idempotency key — it cannot claim its text was a correction or a transfer
--- answer.
+-- SECURITY: interaction_type is derived here from the authoritative session
+-- stage. The client supplies only content, provenance, and an idempotency
+-- key — it cannot claim its text was a correction or a transfer answer.
 -- ---------------------------------------------------------------------------
 create or replace function public.append_learner_turn(
   p_session_id      uuid,
@@ -215,29 +376,33 @@ create or replace function public.append_learner_turn(
 )
 returns uuid
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
-  v_session   public.learning_sessions%rowtype;
-  v_existing  uuid;
-  v_turn_id   uuid;
-  v_sequence  integer;
-  v_type      text;
+  v_user uuid := auth.uid();
+  v_session public.learning_sessions%rowtype;
+  v_existing uuid;
+  v_turn_id uuid;
+  v_sequence integer;
+  v_type text;
 begin
-  -- Lock the session row. All turn writes for a session serialise here, which
-  -- is what makes the sequence allocation below safe.
+  if v_user is null then
+    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  end if;
+
+  -- Lock the session row: all turn writes for a session serialise here, which
+  -- makes sequence allocation safe.
   select * into v_session
     from public.learning_sessions s
    where s.id = p_session_id
      for update;
 
   if not found then
-    raise exception 'session not found or not accessible'
-      using errcode = 'no_data_found';
+    raise exception 'session not found' using errcode = 'no_data_found';
   end if;
 
-  if v_session.user_id <> auth.uid() then
+  if v_session.user_id <> v_user then
     raise exception 'not your session' using errcode = 'insufficient_privilege';
   end if;
 
@@ -247,7 +412,6 @@ begin
   end if;
 
   -- Idempotency: an existing learner turn for this key is returned unchanged.
-  -- Never insert a second one.
   select t.id into v_existing
     from public.session_turns t
    where t.session_id = p_session_id
@@ -269,7 +433,6 @@ begin
     raise exception 'invalid source' using errcode = 'check_violation';
   end if;
 
-  -- Server-derived meaning, from the authoritative stage.
   v_type := case v_session.stage
     when 'repair'   then 'correction'
     when 'transfer' then 'transfer_answer'
@@ -281,10 +444,10 @@ begin
    where t.session_id = p_session_id;
 
   insert into public.session_turns (
-    session_id, client_turn_id, sequence, role,
+    session_id, user_id, client_turn_id, sequence, role,
     interaction_type, source, content
   ) values (
-    p_session_id, p_client_turn_id, v_sequence, 'learner',
+    p_session_id, v_user, p_client_turn_id, v_sequence, 'learner',
     v_type, p_source, p_content
   )
   returning id into v_turn_id;
@@ -294,14 +457,15 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 2. claim_model_call
+-- claim_model_call
 --
 -- Consumes quota BEFORE the provider is contacted. Every provider invocation
 -- counts — the primary call, semantic retries, and exceptional repair calls
 -- alike. A failed call stays consumed, because it really did consume quota.
 --
--- A plpgsql function is transactional, so raising below rolls back the
--- increment too: no claim is recorded unless every check passes.
+-- A turn is claimable when pending, or when claimed longer ago than the
+-- session's stale window (abandoned by a dead process). 'applied' matches
+-- neither, so a finished evaluation is never re-run.
 -- ---------------------------------------------------------------------------
 create or replace function public.claim_model_call(
   p_session_id      uuid,
@@ -309,19 +473,43 @@ create or replace function public.claim_model_call(
 )
 returns boolean
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
+  v_user uuid := auth.uid();
   v_max integer := public.max_model_calls();
+  v_session public.learning_sessions%rowtype;
+  v_stale interval;
   v_updated integer;
 begin
-  -- Charge the allowance. This also verifies ownership and in_progress status,
-  -- and enforces the cap atomically.
+  if v_user is null then
+    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  end if;
+
+  select * into v_session
+    from public.learning_sessions s
+   where s.id = p_session_id;
+
+  if not found then
+    raise exception 'session not found' using errcode = 'no_data_found';
+  end if;
+
+  if v_session.user_id <> v_user then
+    raise exception 'not your session' using errcode = 'insufficient_privilege';
+  end if;
+
+  if v_session.status <> 'in_progress' then
+    raise exception 'session is completed and immutable'
+      using errcode = 'check_violation';
+  end if;
+
+  -- Charge the allowance. plpgsql is transactional, so any exception below
+  -- rolls this increment back: no claim is recorded unless all checks pass.
   update public.learning_sessions s
      set model_calls_used = s.model_calls_used + 1
    where s.id = p_session_id
-     and s.user_id = auth.uid()
+     and s.user_id = v_user
      and s.status = 'in_progress'
      and s.model_calls_used < v_max;
 
@@ -332,14 +520,8 @@ begin
       using errcode = 'check_violation';
   end if;
 
-  -- Mark the turn claimed. Conditional, so a second concurrent claim for the same
--- turn matches no row and is refused.
---
--- Two ways to be claimable:
---   pending                       — never claimed
---   claimed AND older than stale window — abandoned by a dead process
---
--- 'applied' matches neither, so a completed evaluation can never be re-run.
+  v_stale := make_interval(secs => v_session.claim_stale_after_seconds);
+
   update public.session_turns t
      set evaluation_state = 'claimed',
          evaluation_claimed_at = now()
@@ -350,7 +532,7 @@ begin
           t.evaluation_state = 'pending'
           or (
             t.evaluation_state = 'claimed'
-            and t.evaluation_claimed_at < now() - public.claim_stale_after()
+            and t.evaluation_claimed_at < now() - v_stale
           )
      );
 
@@ -372,8 +554,7 @@ $$;
 --
 -- The consumed allowance is deliberately NOT refunded: a provider call was
 -- genuinely made and genuinely spent quota. Retrying therefore performs a
--- fresh claim and consumes a further allowance, which is the honest cost of a
--- transient failure.
+-- fresh claim and consumes a further allowance.
 -- ---------------------------------------------------------------------------
 create or replace function public.release_model_call(
   p_session_id      uuid,
@@ -381,24 +562,28 @@ create or replace function public.release_model_call(
 )
 returns boolean
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
+  v_user uuid := auth.uid();
   v_session public.learning_sessions%rowtype;
   v_updated integer;
 begin
+  if v_user is null then
+    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  end if;
+
   select * into v_session
     from public.learning_sessions s
    where s.id = p_session_id
-     for update;
+   for update;
 
   if not found then
-    raise exception 'session not found or not accessible'
-      using errcode = 'no_data_found';
+    raise exception 'session not found' using errcode = 'no_data_found';
   end if;
 
-  if v_session.user_id <> auth.uid() then
+  if v_session.user_id <> v_user then
     raise exception 'not your session' using errcode = 'insufficient_privilege';
   end if;
 
@@ -408,7 +593,7 @@ begin
   end if;
 
   -- Only a claimed turn can be released. An 'applied' turn is a finished
-  -- evaluation and is never released back into the queue.
+  -- evaluation and is never returned to the queue.
   update public.session_turns t
      set evaluation_state = 'pending',
          evaluation_claimed_at = null
@@ -429,12 +614,15 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 3. apply_turn_result
+-- apply_turn_result
 --
--- Atomic: verify the session is still in_progress, verify this learner turn has
--- no applied student response, insert the linked student turn, update evaluator
--- state, optionally complete. One transaction, under the user's own RLS
--- context, with no service-role key.
+-- Atomic: verify the session is still in_progress, verify this learner turn
+-- has been claimed and has no applied response, insert the linked student
+-- turn, update evaluator state, optionally complete.
+--
+-- Returns ONLY a sanitized public projection. The private evaluator state
+-- stays in the session row; the client never receives mastery, ledger, or
+-- target gap.
 -- ---------------------------------------------------------------------------
 create or replace function public.apply_turn_result(
   p_session_id        uuid,
@@ -450,25 +638,29 @@ create or replace function public.apply_turn_result(
 )
 returns jsonb
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
-  v_session   public.learning_sessions%rowtype;
-  v_sequence  integer;
-  v_state     text;
+  v_user uuid := auth.uid();
+  v_session public.learning_sessions%rowtype;
+  v_sequence integer;
+  v_state text;
 begin
+  if v_user is null then
+    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
+  end if;
+
   select * into v_session
     from public.learning_sessions s
    where s.id = p_session_id
      for update;
 
   if not found then
-    raise exception 'session not found or not accessible'
-      using errcode = 'no_data_found';
+    raise exception 'session not found' using errcode = 'no_data_found';
   end if;
 
-  if v_session.user_id <> auth.uid() then
+  if v_session.user_id <> v_user then
     raise exception 'not your session' using errcode = 'insufficient_privilege';
   end if;
 
@@ -477,9 +669,6 @@ begin
       using errcode = 'check_violation';
   end if;
 
-  -- End-to-end idempotency: a learner turn may receive exactly one applied
-  -- student response. A retry after a lost HTTP response returns the existing
-  -- result instead of appending a second student turn.
   select t.evaluation_state into v_state
     from public.session_turns t
    where t.id = p_learner_turn_id
@@ -498,7 +687,7 @@ begin
   end if;
 
   -- A result may only be applied to a turn that actually consumed allowance.
-  -- This keeps "claim before the provider" from being bypassable by applying
+  -- This keeps "claim before the provider" from being bypassed by applying
   -- straight from 'pending', which would cost no quota at all.
   if v_state <> 'claimed' then
     raise exception 'learner turn must be claimed before a result is applied'
@@ -510,10 +699,10 @@ begin
    where t.session_id = p_session_id;
 
   insert into public.session_turns (
-    session_id, responds_to_turn_id, sequence, role,
+    session_id, user_id, responds_to_turn_id, sequence, role,
     interaction_type, source, content
   ) values (
-    p_session_id, p_learner_turn_id, v_sequence, 'student',
+    p_session_id, v_user, p_learner_turn_id, v_sequence, 'student',
     p_interaction_type, 'voice', p_message
   );
 
@@ -531,8 +720,6 @@ begin
          completed_at     = case when p_complete then now() else s.completed_at end
    where s.id = p_session_id;
 
-  -- Sanitized public projection. The private evaluator state stays in the
-  -- session row; the client never receives mastery, ledger, or target gap.
   return jsonb_build_object(
     'publicStage', p_stage,
     'student', jsonb_build_object(
@@ -544,17 +731,50 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Grants. SECURITY INVOKER functions are still ordinary RPCs, so EXECUTE is
--- granted to authenticated users only — never to anon.
+-- Grants
+--
+-- EXECUTE is revoked from PUBLIC/anon first, then granted only to
+-- `authenticated`. No function is exposed to an unauthenticated caller.
 -- ---------------------------------------------------------------------------
+revoke execute on function public.create_session(text) from public;
+revoke execute on function public.delete_session(uuid) from public;
+revoke execute on function public.set_claim_stale_after(uuid, integer) from public;
 revoke execute on function public.append_learner_turn(uuid, uuid, text, text) from public;
 revoke execute on function public.claim_model_call(uuid, uuid) from public;
 revoke execute on function public.release_model_call(uuid, uuid) from public;
 revoke execute on function public.apply_turn_result(uuid, uuid, text, text, text, text, jsonb, jsonb, boolean, jsonb) from public;
+revoke execute on function public.max_model_calls() from public;
+revoke execute on function public.claim_stale_after() from public;
 
+grant execute on function public.create_session(text) to authenticated;
+grant execute on function public.delete_session(uuid) to authenticated;
+grant execute on function public.set_claim_stale_after(uuid, integer) to authenticated;
 grant execute on function public.append_learner_turn(uuid, uuid, text, text) to authenticated;
 grant execute on function public.claim_model_call(uuid, uuid) to authenticated;
 grant execute on function public.release_model_call(uuid, uuid) to authenticated;
 grant execute on function public.apply_turn_result(uuid, uuid, text, text, text, text, jsonb, jsonb, boolean, jsonb) to authenticated;
 grant execute on function public.max_model_calls() to authenticated;
 grant execute on function public.claim_stale_after() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- updated_at (unchanged from 0001, kept for a fresh-database replay)
+-- ---------------------------------------------------------------------------
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists learning_sessions_set_updated_at on public.learning_sessions;
+create trigger learning_sessions_set_updated_at
+  before update on public.learning_sessions
+  for each row execute function public.set_updated_at();
+
+create index if not exists learning_sessions_user_created_idx
+  on public.learning_sessions (user_id, created_at desc);
