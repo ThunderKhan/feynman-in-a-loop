@@ -10,6 +10,9 @@ import { NextResponse, type NextRequest } from "next/server";
  * deliberately never used on the server — it does not revalidate the token,
  * and cookies can be spoofed.
  */
+/** Routes reachable without an authenticated session. */
+const PUBLIC_PATHS = new Set(["/", "/login", "/signup"]);
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -39,13 +42,19 @@ export async function updateSession(request: NextRequest) {
 
   const user = data?.claims?.sub ? { id: data.claims.sub } : null;
 
-  if (!user && !request.nextUrl.pathname.startsWith("/login")) {
+  const { pathname } = request.nextUrl;
+  const isPublic = PUBLIC_PATHS.has(pathname);
+
+  // Signed-out users may only reach public routes; everything else bounces to
+  // /login, which is itself public so this cannot loop.
+  if (!user && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  if (user && request.nextUrl.pathname === "/login") {
+  // Signed-in users have no reason to see the auth screens.
+  if (user && (pathname === "/login" || pathname === "/signup")) {
     const url = request.nextUrl.clone();
     url.pathname = "/teach";
     return NextResponse.redirect(url);
