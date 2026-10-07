@@ -9,6 +9,38 @@
 alter table public.learning_sessions
   add column if not exists active_target_gap text;
 
+-- Private evaluator state must not become readable merely because it shares a
+-- user-owned row. RLS protects rows, not columns. Replace Slice 2's table-wide
+-- SELECT grant with a public projection. In particular, mastery,
+-- evidence_ledger, model_calls_used, claim timing, and active_target_gap remain
+-- server-only during an in-progress attempt.
+revoke select on public.learning_sessions from authenticated;
+grant select (
+  id,
+  topic,
+  status,
+  stage,
+  student_state,
+  mastery_result,
+  started_at,
+  completed_at,
+  created_at,
+  updated_at
+) on public.learning_sessions to authenticated;
+
+revoke select on public.session_turns from authenticated;
+grant select (
+  id,
+  session_id,
+  responds_to_turn_id,
+  sequence,
+  role,
+  interaction_type,
+  source,
+  content,
+  created_at
+) on public.session_turns to authenticated;
+
 alter table public.learning_sessions
   drop constraint if exists learning_sessions_active_target_gap_length;
 
