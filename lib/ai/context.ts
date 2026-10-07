@@ -1,12 +1,12 @@
-import type { LearningSession, MasteryDimensions } from "../types";
+import type { LearningSession, MasteryDimensions } from "../types.ts";
 import {
   EMPTY_MASTERY,
   normalizeDimensionState,
   type ContextTurn,
   type EvidenceLedger,
   type TurnContext,
-} from "./types";
-import { normalizeLedger } from "./evidence";
+} from "./types.ts";
+import { normalizeLedger } from "./evidence.ts";
 
 export type StoredTurn = {
   id: string;
