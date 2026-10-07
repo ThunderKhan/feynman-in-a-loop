@@ -173,7 +173,7 @@ export const TURN_OUTPUT_JSON_SCHEMA = {
           },
         },
         targetGap: {
-          anyOf: [{ type: "string" }, { type: "null" }],
+          type: ["string", "null"],
         },
         nextAction: {
           type: "string",
@@ -215,7 +215,7 @@ export const TURN_OUTPUT_JSON_SCHEMA = {
               },
               summary: { type: "string" },
               quote: {
-                anyOf: [{ type: "string" }, { type: "null" }],
+                type: ["string", "null"],
               },
             },
           },
