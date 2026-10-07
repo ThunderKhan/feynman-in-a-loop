@@ -4,7 +4,10 @@ import { getUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAIProvider } from "@/lib/ai/provider";
-import { AIProviderError } from "@/lib/ai/errors";
+import {
+  AIProviderError,
+  isRetryableStructuredOutputError,
+} from "@/lib/ai/errors";
 import { selectTurnContext, type StoredTurn } from "@/lib/ai/context";
 import {
   validateStudentBoundary,
@@ -395,48 +398,71 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  let validated: ValidationResult;
+  let validated: ValidationResult | null = null;
 
   try {
-    const raw = await callProvider(input);
+    let raw: TurnOutput | null = null;
 
     try {
-      validated = validateTurnOutput(raw, validationContext);
+      raw = await callProvider(input);
     } catch (error) {
-      if (!(error instanceof TurnValidationError)) throw error;
-
-      if (error.gate === "boundary") {
-        // Gate 1/2 already passed; keep the private evaluator result and repair
-        // only the learner-facing student message.
-        const shapeAndMeaning = validateTurnOutput(
-          {
-            ...raw,
-            student: {
-              ...raw.student,
-              // Temporary safe placeholder solely to re-run Gates 1/2.
-              message: "Could you explain that part another way?",
-            },
-          },
-          validationContext,
-        );
-
-        validated = await repairStudentOnly({
-          userId: user.id,
-          sessionId,
-          learnerTurnId: learnerTurnId as string,
-          input,
-          validated: shapeAndMeaning,
-          reason: error.message,
-        });
-      } else {
+      if (isRetryableStructuredOutputError(error)) {
+        // Groq's live strict-output endpoint can occasionally return a
+        // failed_generation/schema 400 even though strict mode is documented
+        // as constrained. Spend one normal, quota-accounted retry rather than
+        // weakening the schema contract or asking the learner to resubmit.
         validated = await fullRetry({
           userId: user.id,
           sessionId,
           learnerTurnId: learnerTurnId as string,
           input,
-          reason: error.message,
+          reason: error instanceof Error ? error.message : "Structured output failed.",
           validationContext,
         });
+      } else {
+        throw error;
+      }
+    }
+
+    if (raw) {
+      try {
+        validated = validateTurnOutput(raw, validationContext);
+      } catch (error) {
+        if (!(error instanceof TurnValidationError)) throw error;
+
+        if (error.gate === "boundary") {
+          // Gate 1/2 already passed; keep the private evaluator result and
+          // repair only the learner-facing student message.
+          const shapeAndMeaning = validateTurnOutput(
+            {
+              ...raw,
+              student: {
+                ...raw.student,
+                // Temporary safe placeholder solely to re-run Gates 1/2.
+                message: "Could you explain that part another way?",
+              },
+            },
+            validationContext,
+          );
+
+          validated = await repairStudentOnly({
+            userId: user.id,
+            sessionId,
+            learnerTurnId: learnerTurnId as string,
+            input,
+            validated: shapeAndMeaning,
+            reason: error.message,
+          });
+        } else {
+          validated = await fullRetry({
+            userId: user.id,
+            sessionId,
+            learnerTurnId: learnerTurnId as string,
+            input,
+            reason: error.message,
+            validationContext,
+          });
+        }
       }
     }
   } catch (error) {
@@ -475,6 +501,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     console.error("Turn evaluation failed", error);
+    return errorResponse(
+      502,
+      "evaluation_failed",
+      "The AI student could not finish this turn. Your teaching turn is saved.",
+      true,
+    );
+  }
+
+  if (!validated) {
+    await releaseClaim(user.id, sessionId, learnerTurnId as string);
     return errorResponse(
       502,
       "evaluation_failed",
