@@ -153,10 +153,12 @@ Do not merely ask the learner to repeat their definition.
 
 ## Structured evaluator output
 
-The shipped Slice 3 schema returns two separate regions in one structured call:
-a private `evaluation` object and a public `student` object. The provider
-enforces JSON shape where supported; Zod and semantic validation run on the
-server regardless.
+The shipped Slice 3 schema returns two separate regions in one model result:
+a private `evaluation` object and a public `student` object. Normal Groq
+turns request strict JSON Schema output. If Groq's live constrained decoder
+returns a structured-generation 400, the single quota-accounted retry uses JSON
+Object Mode; Zod, semantic validation, and the public/private boundary still run
+on the server and remain authoritative.
 
 Target shape:
 
