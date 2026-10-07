@@ -41,7 +41,7 @@ The evaluator should:
 - recommend the next student behavior;
 - decide when the evidence is sufficient to finish.
 
-The evaluator is authoritative for learning state, subject to server-side validation.
+The evaluator proposes learning state. The server is authoritative: it validates evidence, legal transitions, the public/private boundary, and database invariants before anything is persisted.
 
 ### 3. Optional verifier
 Only add if testing shows the evaluator is too permissive or inconsistent.
@@ -152,6 +152,11 @@ Transfer:
 Do not merely ask the learner to repeat their definition.
 
 ## Structured evaluator output
+
+The shipped Slice 3 schema returns two separate regions in one structured call:
+a private `evaluation` object and a public `student` object. The provider
+enforces JSON shape where supported; Zod and semantic validation run on the
+server regardless.
 
 Target shape:
 
@@ -267,11 +272,13 @@ If the model:
 
 the server should reject/repair the result rather than silently persisting it.
 
-## Open AI decisions
+## Current implementation decisions
 
-- Exact model/provider
-- Temperature / sampling configuration
-- Whether student and evaluator use one or two calls per turn
-- Whether a verifier is needed
-- Exact schema validation library
-- Whether mastery uses a score internally or only categorical states
+- Hosted provider: Groq; local development fallback: Ollama.
+- Exact hosted model: benchmark-driven between GPT-OSS 20B and 120B.
+- One structured provider call per learner turn in the normal path.
+- One exceptional second call is allowed only to repair an invalid public student response or a failed structured/semantic result; every invocation consumes quota.
+- Schema validation: Zod plus server semantic/boundary gates.
+- Mastery is categorical only: `untested | weak | partial | mastered`.
+- The hidden active target gap and evidence ledger are server-only state, not browser-readable fields.
+- A verifier remains optional and should be added only if live testing proves it necessary.
