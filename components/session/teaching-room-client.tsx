@@ -25,6 +25,12 @@ type PendingTurn = {
   content: string;
 };
 
+type TurnError = {
+  code: string;
+  message: string;
+  retryable: boolean;
+};
+
 export function TeachingRoomClient({
   sessionId,
   topic,
@@ -48,7 +54,7 @@ export function TeachingRoomClient({
   const [input, setInput] = useState("");
   const [pending, setPending] = useState<PendingTurn | null>(initialPending);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<TurnError | null>(null);
   const inFlightRef = useRef(false);
 
   const isCompleted = completed || stage === "completed";
@@ -107,13 +113,23 @@ export function TeachingRoomClient({
         | null;
 
       if (!response.ok || !body || !("student" in body)) {
+        const payload =
+          body && "error" in body && body.error
+            ? body.error
+            : null;
         const providerRateLimited = response.status === 429;
-        const message = providerRateLimited
-          ? "The AI provider is rate-limited right now. Wait a moment, then try again."
-          : body && "error" in body
-            ? body.error?.message
-            : "The AI student could not respond.";
-        throw new Error(message ?? "The AI student could not respond.");
+
+        setStudentState("error");
+        setError({
+          code:
+            payload?.code ??
+            (providerRateLimited ? "provider_rate_limited" : "turn_failed"),
+          message: providerRateLimited
+            ? "The AI provider is rate-limited right now. Wait a moment, then try again."
+            : payload?.message ?? "The AI student could not respond.",
+          retryable: payload?.retryable ?? providerRateLimited,
+        });
+        return;
       }
 
       setStage(body.publicStage);
@@ -132,11 +148,14 @@ export function TeachingRoomClient({
       setInput("");
     } catch (caught) {
       setStudentState("error");
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "The AI student could not respond.",
-      );
+      setError({
+        code: "network_error",
+        message:
+          caught instanceof Error
+            ? caught.message
+            : "The AI student could not respond.",
+        retryable: true,
+      });
     } finally {
       inFlightRef.current = false;
       setBusy(false);
@@ -253,7 +272,7 @@ export function TeachingRoomClient({
                 }}
                 maxLength={4000}
                 rows={2}
-                disabled={busy}
+                disabled={busy || Boolean(error && !error.retryable)}
                 placeholder={
                   latestStudent
                     ? "Teach that part in your own words…"
@@ -263,7 +282,7 @@ export function TeachingRoomClient({
               />
               <button
                 type="submit"
-                disabled={busy || !input.trim()}
+                disabled={busy || !input.trim() || Boolean(error && !error.retryable)}
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-base-100 text-base-950 transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
                 aria-label="Submit teaching turn"
               >
@@ -276,8 +295,8 @@ export function TeachingRoomClient({
                 className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-base-800 px-4 py-3 text-sm text-base-400"
                 role="alert"
               >
-                <span>{error}</span>
-                {pending ? (
+                <span>{error.message}</span>
+                {pending && error.retryable ? (
                   <button
                     type="button"
                     onClick={() => void submitTurn(pending)}
@@ -287,6 +306,13 @@ export function TeachingRoomClient({
                     <RotateCcw size={13} />
                     Try again
                   </button>
+                ) : !error.retryable ? (
+                  <a
+                    href="/teach"
+                    className="shrink-0 text-xs text-base-200 underline-offset-4 hover:underline"
+                  >
+                    New session
+                  </a>
                 ) : null}
               </div>
             ) : null}
