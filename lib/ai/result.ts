@@ -1,5 +1,5 @@
-import type { MasteryDimensions } from "@/lib/types";
-import type { EvidenceLedger } from "@/lib/ai/types";
+import type { MasteryDimensions } from "../types";
+import type { EvidenceLedger } from "./types";
 
 const LABELS: Record<keyof MasteryDimensions, string> = {
   coreIdea: "Core idea",
