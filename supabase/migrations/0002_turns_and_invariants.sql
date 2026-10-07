@@ -34,6 +34,19 @@
 -- the live project; this migration is what closes the hole on both a fresh
 -- database and the existing one.
 --
+-- RERUN SAFETY: this file is an upgrade from exactly what 0001 produces, and
+-- is also safe to run again after a partial failure of itself. Every object is
+-- either `create or replace`, `if not exists`, or explicitly dropped before it
+-- is recreated:
+--
+--   policies   drop policy if exists -> create policy   (no IF NOT EXISTS form)
+--   triggers   drop trigger if exists -> create trigger
+--   functions  create or replace function
+--   indexes    drop index if exists   -> create index
+--   constraint drop constraint if exists -> add constraint
+--   columns    add column if not exists
+--   grants     revoke/grant are inherently idempotent
+--
 -- See devpost/spec.md > Database Operations, > Data Model, > Security.
 
 -- ---------------------------------------------------------------------------
@@ -98,20 +111,25 @@ comment on table public.session_turns is
   'Transcript turns. Learner turns are the evidence; student turns answer them.';
 
 -- One row per turn position within a session.
-create unique index if not exists session_turns_session_sequence_uidx
+-- Dropped before recreation so a rerun cannot preserve an outdated definition.
+drop index if exists session_turns_session_sequence_uidx on public.session_turns;
+create unique index session_turns_session_sequence_uidx
   on public.session_turns (session_id, sequence);
 
 -- Idempotency: the same client_turn_id can never produce two learner turns.
-create unique index if not exists session_turns_client_turn_uidx
+drop index if exists session_turns_client_turn_uidx on public.session_turns;
+create unique index session_turns_client_turn_uidx
   on public.session_turns (session_id, client_turn_id)
   where client_turn_id is not null;
 
 -- At most ONE student response per learner turn, enforced by the database.
-create unique index if not exists session_turns_one_response_uidx
+drop index if exists session_turns_one_response_uidx on public.session_turns;
+create unique index session_turns_one_response_uidx
   on public.session_turns (responds_to_turn_id)
   where responds_to_turn_id is not null;
 
-create index if not exists session_turns_session_idx
+drop index if exists session_turns_session_idx on public.session_turns;
+create index session_turns_session_idx
   on public.session_turns (session_id, sequence);
 
 -- ---------------------------------------------------------------------------
@@ -132,15 +150,22 @@ grant select on table public.session_turns to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- RLS: read path only
+--
+-- Every policy is dropped before being recreated. `create policy` has no
+-- IF NOT EXISTS form, and a policy inherited from 0001 would otherwise abort
+-- the migration with 42710. Drop-then-create also guarantees the definition in
+-- this file wins, rather than an older one surviving.
 -- ---------------------------------------------------------------------------
 alter table public.learning_sessions enable row level security;
 alter table public.session_turns enable row level security;
 
 -- Drop 0001's broad mutation policies: with privileges revoked they are inert,
 -- and removing them stops them being mistaken for the security boundary.
+drop policy if exists "sessions_select_own" on public.learning_sessions;
 drop policy if exists "sessions_insert_own" on public.learning_sessions;
 drop policy if exists "sessions_update_own_not_completed" on public.learning_sessions;
 drop policy if exists "sessions_delete_own" on public.learning_sessions;
+drop policy if exists "turns_select_own" on public.session_turns;
 
 create policy "sessions_select_own"
   on public.learning_sessions for select
@@ -757,24 +782,7 @@ grant execute on function public.max_model_calls() to authenticated;
 grant execute on function public.claim_stale_after() to authenticated;
 
 -- ---------------------------------------------------------------------------
--- updated_at (unchanged from 0001, kept for a fresh-database replay)
+-- Everything above this line is owned by 0001 (set_updated_at) or 0002.
+-- Nothing is redefined here: 0001 already created these, and repeating them
+-- would only risk definition drift between a fresh and an upgraded database.
 -- ---------------------------------------------------------------------------
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-security invoker
-set search_path = ''
-as $$
-begin
-  new.updated_at := now();
-  return new;
-end;
-$$;
-
-drop trigger if exists learning_sessions_set_updated_at on public.learning_sessions;
-create trigger learning_sessions_set_updated_at
-  before update on public.learning_sessions
-  for each row execute function public.set_updated_at();
-
-create index if not exists learning_sessions_user_created_idx
-  on public.learning_sessions (user_id, created_at desc);
