@@ -19,6 +19,26 @@ type GroqResponse = {
 
 export const GROQ_PRODUCTION_MODEL = "openai/gpt-oss-120b" as const;
 
+export function groqResponseFormatFor(input: TurnInput) {
+  // Normal turns use Groq's strongest constrained schema mode. The live API
+  // has intermittently returned 400 failed_generation errors on more complex
+  // follow-up turns despite strict mode. Our one explicitly-budgeted retry
+  // therefore falls back to JSON Object Mode: Groq still guarantees JSON
+  // syntax, while Zod + semantic + boundary validation remain authoritative.
+  if (input.mode === "retry" || input.mode === "student_repair") {
+    return { type: "json_object" as const };
+  }
+
+  return {
+    type: "json_schema" as const,
+    json_schema: {
+      name: "feynman_turn",
+      strict: true,
+      schema: TURN_OUTPUT_JSON_SCHEMA,
+    },
+  };
+}
+
 export class GroqProvider implements AIProvider {
   private readonly model: string;
 
@@ -62,14 +82,7 @@ export class GroqProvider implements AIProvider {
           temperature: 0.2,
           top_p: 1,
           stream: false,
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "feynman_turn",
-              strict: true,
-              schema: TURN_OUTPUT_JSON_SCHEMA,
-            },
-          },
+          response_format: groqResponseFormatFor(input),
         }),
         signal: AbortSignal.timeout(45_000),
       });
