@@ -101,6 +101,43 @@ function validateMeaning(
     output.evaluation.evidence,
   );
 
+  const stage = output.evaluation.stage;
+  if (
+    (stage === "diagnose" || stage === "repair") &&
+    !output.evaluation.targetGap
+  ) {
+    throw new TurnValidationError(
+      "Diagnostic and repair stages require a private target gap.",
+      "meaning",
+    );
+  }
+  if (
+    (stage === "transfer" || stage === "assess" || stage === "completed") &&
+    output.evaluation.targetGap
+  ) {
+    throw new TurnValidationError(
+      "Target gap must be cleared after repair.",
+      "meaning",
+    );
+  }
+
+  const allowedActions: Record<TurnOutput["evaluation"]["stage"], Array<TurnOutput["evaluation"]["nextAction"]>> = {
+    orient: ["clarify"],
+    explain: ["clarify", "probe"],
+    diagnose: ["clarify", "probe"],
+    repair: ["clarify", "probe", "misconception"],
+    transfer: ["clarify", "transfer"],
+    assess: ["assess", "complete"],
+    completed: ["complete"],
+  };
+
+  if (!allowedActions[stage].includes(output.evaluation.nextAction)) {
+    throw new TurnValidationError(
+      `nextAction ${output.evaluation.nextAction} is inconsistent with stage ${stage}.`,
+      "meaning",
+    );
+  }
+
   for (const dimension of DIMENSIONS) {
     const state = output.evaluation.dimensions[dimension];
     if (state !== "untested" && merged[dimension].length === 0) {
@@ -109,6 +146,26 @@ function validateMeaning(
         "meaning",
       );
     }
+  }
+
+  if (
+    output.evaluation.dimensions.misconceptionRepair !== "untested" &&
+    !merged.misconceptionRepair.some((item) => item.type === "correction")
+  ) {
+    throw new TurnValidationError(
+      "Misconception-repair credit requires correction evidence.",
+      "meaning",
+    );
+  }
+
+  if (
+    output.evaluation.dimensions.transfer !== "untested" &&
+    !merged.transfer.some((item) => item.type === "transfer_answer")
+  ) {
+    throw new TurnValidationError(
+      "Transfer credit requires transfer-answer evidence.",
+      "meaning",
+    );
   }
 
   if (output.evaluation.shouldComplete) {
