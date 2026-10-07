@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-concurrency=1 tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:db": "node --test --test-concurrency=1 tests/integration/*.test.ts",
-    "test:unit": "node --test --test-concurrency=1 tests/unit/*.test.ts"
+    "test:unit": "node --test --test-concurrency=1 tests/unit/*.test.ts",
+    "benchmark:models": "node scripts/benchmark-models.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
