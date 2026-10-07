@@ -8,6 +8,7 @@ import {
   claimCall,
   readTurns,
   readSession,
+  applyResult,
   type TestUser,
   assertSchemaReady,} from "../helpers/supabase.ts";
 
@@ -78,39 +79,56 @@ test("a repeated clientTurnId returns the same turn and inserts no duplicate", a
   }
 });
 
-test("interaction_type is derived from the session stage, not supplied by the client", async () => {
+test("interaction_type is derived from the authoritative stage, not client input", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
-    // Session starts at stage 'orient' → explanation.
-    const { turnId } = await appendTurn(alice.client, sid, "It checks the middle.");
+    // Session starts at orient, so the first learner turn is an explanation.
+    const first = await appendTurn(alice.client, sid, "It checks the middle.");
     let turns = await readTurns(alice.client, sid);
-    assert.equal(turns.data[0].interaction_type, "explanation");
+    let learnerTurns = turns.data.filter((t: { role: string }) => t.role === "learner");
+    assert.equal(learnerTurns[0].interaction_type, "explanation");
 
-    // Move the session into repair, then append again.
-    const { error: stageErr } = await alice.client
-      .from("learning_sessions")
-      .update({ stage: "repair" })
-      .eq("id", sid);
-    assert.equal(stageErr, null);
+    // Advance stage only through the authorized evaluator path. Direct table
+    // UPDATE is intentionally unavailable to authenticated clients.
+    const { claimCall } = await import("../helpers/supabase.ts");
+    assert.equal((await claimCall(alice.client, sid, first.turnId)).ok, true);
+    const toRepair = await applyResult(alice.client, {
+      sessionId: sid,
+      learnerTurnId: first.turnId,
+      stage: "repair",
+    });
+    assert.equal(toRepair.ok, true, toRepair.error ?? "");
 
-    await appendTurn(alice.client, sid, "Ordering is what tells us which half cannot contain it.");
+    const correction = await appendTurn(
+      alice.client,
+      sid,
+      "Ordering is what tells us which half cannot contain it.",
+    );
     turns = await readTurns(alice.client, sid);
+    learnerTurns = turns.data.filter((t: { role: string }) => t.role === "learner");
     assert.equal(
-      turns.data[1].interaction_type,
+      learnerTurns[1].interaction_type,
       "correction",
       "stage 'repair' must yield 'correction'",
     );
 
-    const { error: tErr } = await alice.client
-      .from("learning_sessions")
-      .update({ stage: "transfer" })
-      .eq("id", sid);
-    assert.equal(tErr, null);
+    assert.equal((await claimCall(alice.client, sid, correction.turnId)).ok, true);
+    const toTransfer = await applyResult(alice.client, {
+      sessionId: sid,
+      learnerTurnId: correction.turnId,
+      stage: "transfer",
+    });
+    assert.equal(toTransfer.ok, true, toTransfer.error ?? "");
 
-    await appendTurn(alice.client, sid, "Yes — the same ordering property is what matters.");
+    await appendTurn(
+      alice.client,
+      sid,
+      "Yes — the same ordering property is what matters.",
+    );
     turns = await readTurns(alice.client, sid);
+    learnerTurns = turns.data.filter((t: { role: string }) => t.role === "learner");
     assert.equal(
-      turns.data[2].interaction_type,
+      learnerTurns[2].interaction_type,
       "transfer_answer",
       "stage 'transfer' must yield 'transfer_answer'",
     );
