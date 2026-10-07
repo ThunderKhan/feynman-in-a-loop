@@ -11,13 +11,55 @@ if (!process.env.GROQ_API_KEY) {
   );
 }
 
-const models = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"] as const;
+const ALL_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"] as const;
+type ModelName = (typeof ALL_MODELS)[number];
+
+function arg(name: string) {
+  const flag = `--${name}`;
+  const index = process.argv.indexOf(flag);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+const requestedModel = arg("model");
+const requestedCase = arg("case");
+
+if (
+  requestedModel &&
+  !ALL_MODELS.includes(requestedModel as ModelName)
+) {
+  throw new Error(
+    `Unknown model "${requestedModel}". Use one of: ${ALL_MODELS.join(", ")}`,
+  );
+}
+
+const models: readonly ModelName[] = requestedModel
+  ? [requestedModel as ModelName]
+  : ALL_MODELS;
+
+const selectedCases = requestedCase
+  ? benchmarkCases.filter((item) => item.id === requestedCase)
+  : benchmarkCases;
+
+if (requestedCase && selectedCases.length === 0) {
+  throw new Error(
+    `Unknown benchmark case "${requestedCase}". Use one of: ${benchmarkCases
+      .map((item) => item.id)
+      .join(", ")}`,
+  );
+}
+
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 type CaseResult = {
   caseId: string;
   valid: boolean;
   checks: Record<string, boolean>;
+  observed: {
+    stage: string;
+    targetGap: string | null;
+    nextAction: string;
+    studentMessage: string;
+  } | null;
   error: string | null;
   latencyMs: number;
 };
@@ -29,8 +71,8 @@ for (const model of models) {
   const provider = new GroqProvider();
   const caseResults: CaseResult[] = [];
 
-  for (let index = 0; index < benchmarkCases.length; index++) {
-    const benchmark = benchmarkCases[index];
+  for (let index = 0; index < selectedCases.length; index++) {
+    const benchmark = selectedCases[index];
     const started = performance.now();
 
     try {
@@ -45,6 +87,12 @@ for (const model of models) {
         caseId: benchmark.id,
         valid: Object.values(checks).every(Boolean),
         checks,
+        observed: {
+          stage: validated.output.evaluation.stage,
+          targetGap: validated.output.evaluation.targetGap,
+          nextAction: validated.output.evaluation.nextAction,
+          studentMessage: validated.output.student.message,
+        },
         error: null,
         latencyMs: Math.round(performance.now() - started),
       });
@@ -57,6 +105,7 @@ for (const model of models) {
         caseId: benchmark.id,
         valid: false,
         checks,
+        observed: null,
         error: error instanceof Error ? error.message : String(error),
         latencyMs: Math.round(performance.now() - started),
       });
@@ -65,7 +114,7 @@ for (const model of models) {
     // Free-plan GPT-OSS is currently 8K TPM. Keep the same small corpus for
     // both models and deliberately pace requests so the benchmark itself does
     // not become a rate-limit test.
-    if (index < benchmarkCases.length - 1 || model !== models.at(-1)) {
+    if (index < selectedCases.length - 1 || model !== models.at(-1)) {
       await delay(15_000);
     }
   }
@@ -80,13 +129,25 @@ for (const model of models) {
 
 console.log(JSON.stringify(report, null, 2));
 
-const twenty = report["openai/gpt-oss-20b"];
-const oneTwenty = report["openai/gpt-oss-120b"];
+if (models.length === 2 && !requestedCase) {
+  const twenty = report["openai/gpt-oss-20b"];
+  const oneTwenty = report["openai/gpt-oss-120b"];
 
-if (twenty.score === twenty.total) {
-  console.log("\nRecommendation: openai/gpt-oss-20b passed every automatic check; prefer it for lower latency.");
-} else if (oneTwenty.score > twenty.score) {
-  console.log("\nRecommendation: openai/gpt-oss-120b scored higher on this corpus.");
-} else {
-  console.log("\nRecommendation: neither model cleanly wins. Review failed cases before choosing.");
+  if (twenty.score === twenty.total) {
+    console.log(
+      "\nRecommendation: openai/gpt-oss-20b passed every automatic check; prefer it for lower latency.",
+    );
+  } else if (oneTwenty.score === oneTwenty.total) {
+    console.log(
+      "\nRecommendation: openai/gpt-oss-120b passed every check while 20B did not.",
+    );
+  } else if (oneTwenty.score > twenty.score) {
+    console.log(
+      "\nRecommendation: 120B leads, but inspect the remaining failed criteria before locking it.",
+    );
+  } else {
+    console.log(
+      "\nRecommendation: neither model cleanly wins. Review failed cases before choosing.",
+    );
+  }
 }
