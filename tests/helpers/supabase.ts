@@ -271,6 +271,28 @@ export async function assertSchemaReady(client: SupabaseClient) {
         `active_target_gap probe returned: ${columnProbe.error.message}`,
     );
   }
+
+  const applyProbe = await adminClient().rpc("apply_turn_result", {
+    p_user_id: userId,
+    p_session_id: randomUUID(),
+    p_learner_turn_id: randomUUID(),
+    p_student_state: "confused",
+    p_message: "probe",
+    p_interaction_type: "probe",
+    p_stage: "diagnose",
+    p_mastery: {},
+    p_evidence_ledger: {},
+    p_target_gap: "probe",
+    p_complete: false,
+    p_mastery_result: null,
+  });
+
+  if (!applyProbe.error || !/session not found/i.test(applyProbe.error.message)) {
+    throw new Error(
+      "Slice 3 schema is stale: apply_turn_result(..., target_gap, ...) " +
+        `probe returned ${applyProbe.error?.message ?? "no error"}`,
+    );
+  }
 }
 
 /** Best-effort server-only cleanup of a session created by a test. */
