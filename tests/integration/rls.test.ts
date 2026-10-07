@@ -4,8 +4,6 @@ import {
   createTestUser,
   createSession,
   cleanupSession,
-  appendTurn,
-  clientTurnId,
   readSession,
   adminClient,
   type TestUser,
@@ -47,7 +45,8 @@ test("a user CANNOT read another user's session (cross-user select denied)", asy
   const id = await createSession(alice.client, "Recursion");
 
   const { data, error } = await readSession(bob.client, id);
-  // RLS filters the row out rather than erroring; either way no data leaks.
+  // Authenticated cross-user reads are filtered by RLS without an error.
+  assert.equal(error, null);
   assert.equal(data, null, "cross-user read must not return the row");
 
   const { data: list } = await bob.client
@@ -109,14 +108,20 @@ test("a session can only be created through create_session, which derives the ow
 });
 test("an anonymous client cannot read user-owned rows", async () => {
   const id = await createSession(alice.client, "Binary Search");
+  try {
+    const { data, error } = await (await import("../helpers/supabase.ts")).anonClient()
+      .from("learning_sessions")
+      .select("id")
+      .eq("id", id);
 
-  const { data: anonList } = await (await import("../helpers/supabase.ts")).anonClient()
-    .from("learning_sessions")
-    .select("id")
-    .eq("id", id);
-  assert.deepEqual(anonList, [], "anonymous access must return nothing");
-
-  await cleanupSession(alice.client, id);
+    // 0002 revokes table privileges from anon entirely, so PostgREST returns
+    // permission denied with null data. This is stronger than an RLS-filtered
+    // empty result and is the expected production boundary.
+    assert.ok(error, "anonymous SELECT must be rejected");
+    assert.equal(data, null, "anonymous SELECT must return no row data");
+  } finally {
+    await cleanupSession(alice.client, id);
+  }
 });
 
 test("topic bounds are enforced by the database, not only by the app/RPC", async () => {
