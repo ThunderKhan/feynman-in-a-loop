@@ -19,11 +19,13 @@ loadEnv({ path: ".env.local" });
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 export const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+export const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY || !SUPABASE_SECRET_KEY) {
   throw new Error(
-    "Missing NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY. " +
-      "Integration tests require a real Supabase project and .env.local.",
+    "Missing NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, " +
+      "or SUPABASE_SECRET_KEY. Integration tests require a real Supabase project " +
+      "and server-only secret key in .env.local.",
   );
 }
 
@@ -38,6 +40,37 @@ export function anonClient(): SupabaseClient {
   return createClient(SUPABASE_URL!, SUPABASE_PUBLISHABLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+/**
+ * Server-only client used to exercise evaluator/quota RPCs exactly as the
+ * Next.js server will. Never expose this key to browser code.
+ */
+export function adminClient(): SupabaseClient {
+  return createClient(SUPABASE_URL!, SUPABASE_SECRET_KEY!, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
+async function verifiedUserId(client: SupabaseClient) {
+  const { data, error } = await client.auth.getUser();
+  if (error || !data.user) {
+    throw new Error(`Could not verify test caller: ${error?.message ?? "no user"}`);
+  }
+  return data.user.id;
+}
+
+async function serverRpc(
+  client: SupabaseClient,
+  fn: string,
+  args: Record<string, unknown>,
+) {
+  const userId = await verifiedUserId(client);
+  return adminClient().rpc(fn, { p_user_id: userId, ...args });
 }
 
 export type TestUser = {
@@ -170,7 +203,7 @@ export async function setStaleWindow(
   sessionId: string,
   seconds: number,
 ) {
-  const { data, error } = await client.rpc("set_claim_stale_after", {
+  const { data, error } = await serverRpc(client, "set_claim_stale_after", {
     p_session_id: sessionId,
     p_seconds: seconds,
   });
@@ -241,7 +274,7 @@ export async function claimCall(
   sessionId: string,
   turnId: string,
 ) {
-  const { data, error } = await client.rpc("claim_model_call", {
+  const { data, error } = await serverRpc(client, "claim_model_call", {
     p_session_id: sessionId,
     p_learner_turn_id: turnId,
   });
@@ -259,7 +292,7 @@ export async function releaseCall(
   sessionId: string,
   turnId: string,
 ) {
-  const { data, error } = await client.rpc("release_model_call", {
+  const { data, error } = await serverRpc(client, "release_model_call", {
     p_session_id: sessionId,
     p_learner_turn_id: turnId,
   });
@@ -286,7 +319,7 @@ export async function applyResult(
     masteryResult?: Record<string, unknown>;
   },
 ) {
-  const { data, error } = await client.rpc("apply_turn_result", {
+  const { data, error } = await serverRpc(client, "apply_turn_result", {
     p_session_id: args.sessionId,
     p_learner_turn_id: args.learnerTurnId,
     p_student_state: args.studentState ?? "confused",
