@@ -1,6 +1,10 @@
 import { config as loadEnv } from "dotenv";
 import { GroqProvider } from "../lib/ai/providers/groq.ts";
-import { validateTurnOutput } from "../lib/ai/validate.ts";
+import {
+  TurnValidationError,
+  validateTurnOutput,
+} from "../lib/ai/validate.ts";
+import { isRetryableStructuredOutputError } from "../lib/ai/errors.ts";
 import { benchmarkCases } from "../tests/corpus/benchmark-cases.ts";
 
 loadEnv({ path: ".env.local" });
@@ -61,6 +65,8 @@ type CaseResult = {
     studentMessage: string;
   } | null;
   error: string | null;
+  attempts: number;
+  firstFailure: string | null;
   latencyMs: number;
 };
 
@@ -75,9 +81,50 @@ for (const model of models) {
     const benchmark = selectedCases[index];
     const started = performance.now();
 
+    let attempts = 0;
+    let firstFailure: string | null = null;
+
     try {
-      const raw = await provider.completeTurn(benchmark.input);
-      const validated = validateTurnOutput(raw, benchmark.validation);
+      let validated: ReturnType<typeof validateTurnOutput> | null = null;
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        attempts = attempt;
+        const input =
+          attempt === 1
+            ? benchmark.input
+            : {
+                ...benchmark.input,
+                mode: "retry" as const,
+                retryReason: firstFailure,
+              };
+
+        try {
+          const raw = await provider.completeTurn(input);
+          validated = validateTurnOutput(raw, benchmark.validation);
+          break;
+        } catch (error) {
+          const retryable =
+            attempt === 1 &&
+            (isRetryableStructuredOutputError(error) ||
+              error instanceof TurnValidationError);
+
+          if (!retryable) throw error;
+
+          firstFailure =
+            error instanceof Error ? error.message : String(error);
+
+          // Match the production policy: one extra model invocation is
+          // permitted for a failed structured/semantic result, and that call
+          // would consume quota. Pace it here so the benchmark itself does not
+          // trip the free-plan TPM limit.
+          await delay(15_000);
+        }
+      }
+
+      if (!validated) {
+        throw new Error("Benchmark exhausted its one allowed retry.");
+      }
+
       const checks = {
         schemaAndBoundary: true,
         ...benchmark.score(validated.output),
@@ -94,6 +141,8 @@ for (const model of models) {
           studentMessage: validated.output.student.message,
         },
         error: null,
+        attempts,
+        firstFailure,
         latencyMs: Math.round(performance.now() - started),
       });
     } catch (error) {
@@ -107,6 +156,8 @@ for (const model of models) {
         checks,
         observed: null,
         error: error instanceof Error ? error.message : String(error),
+        attempts,
+        firstFailure,
         latencyMs: Math.round(performance.now() - started),
       });
     }
