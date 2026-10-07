@@ -553,22 +553,21 @@ Do not add multiple model providers merely to make the architecture appear sophi
 
 # AI MODEL / PROVIDER STATUS
 
-NOT FINALIZED.
+Hosted provider is now intentionally selected:
+- **Groq** is the primary hosted provider for the hackathon PoC.
+- **Ollama** is the local development / emergency fallback.
+- There is no automatic runtime provider failover.
+- The exact Groq GPT-OSS model remains benchmark-driven between
+  `openai/gpt-oss-20b` and `openai/gpt-oss-120b`.
+- Use one structured model call per learner turn in the normal path.
+- The server validates every structured result before state can change.
 
-Free / zero-cost possibilities discussed:
-- Gemini free-tier models;
-- Gemini Live if a suitable free realtime tier remains available;
-- Groq free tier;
-- OpenRouter free models;
-- Ollama + Qwen locally;
-- browser-side inference using WebGPU/WebLLM/Transformers.js where feasible.
+Selection rule:
+- benchmark 20B and 120B against the same small corpus;
+- choose 20B if it satisfies the learning/evaluator boundary reliably;
+- move to 120B only if the larger model materially improves the required cases.
 
-Current principle:
-- test the learning loop with the simplest free setup first;
-- prefer one provider/model if it can reliably perform the role;
-- preserve a local fallback when useful.
-
-Do not hard-code product logic around a provider before this is intentionally selected.
+The zero-dollar constraint remains binding.
 
 # VOICE ARCHITECTURE STATUS
 
@@ -640,15 +639,22 @@ Do not commit `.env` files containing secrets.
 
 ## Supabase authorization
 
-Use Row Level Security.
+Use Row Level Security for row ownership, but do not confuse row security with
+column authority.
 
-A user must only be able to access their own:
-- profile data;
-- learning sessions;
-- transcripts;
-- mastery state.
+Current boundary:
+- authenticated browser clients can read only their own rows;
+- authenticated receives only the public column projection needed by the UI;
+- private evaluator/quota fields (raw mastery, evidence ledger, model-call
+  counters, claim lifecycle, active target gap) are server-only;
+- direct table INSERT/UPDATE/DELETE is revoked from authenticated clients;
+- session creation and learner-turn append use narrow ownership-checking RPCs;
+- claim/release/apply evaluator RPCs are executable only through the trusted
+  Next.js server using the Supabase server secret;
+- the server verifies the user's JWT first and every sensitive RPC still checks
+  row ownership explicitly.
 
-Do not rely solely on frontend filtering for authorization.
+Never expose the Supabase server secret to browser code.
 
 ## Abuse / free-tier protection
 
@@ -981,19 +987,18 @@ For the Bolt-style starting code:
 
 # OPEN DECISIONS
 
-These are NOT finalized and should remain open until tested.
+Only genuinely unresolved choices should remain here.
 
-## AI provider / exact model
-Need to choose a zero-cost option after practical testing.
-
-## Realtime voice provider
-Need to compare reliability, browser support, latency, quota, and deployment constraints.
+## Exact Groq model
+Benchmark `openai/gpt-oss-20b` and `openai/gpt-oss-120b` against the same
+learning corpus before locking the production model.
 
 ## AI response voice
-May use browser speech synthesis, realtime native audio, or remain text-only for the AI response in the earliest build.
+Optional. Browser speech synthesis may be added only after the input path and
+text learning loop are reliable. Text-only AI responses are acceptable for the
+earliest build.
 
-## Mastery scoring
-Need to define a defensible, understandable scoring method.
-
-## Student misconception engine
-Need to design how misconceptions are selected and how random/confusing hallucinations are avoided.
+The primary voice-input direction is Web Speech API with runtime feature
+detection and a guaranteed typed fallback. Mastery is categorical
+(`untested | weak | partial | mastered`) across the four locked dimensions;
+there is no percentage score.
