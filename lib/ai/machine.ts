@@ -1,9 +1,9 @@
-import type { Stage } from "../types";
-import type { ContextTurn, EvidenceLedger, TurnEvaluation } from "./types";
+import type { Stage } from "../types.ts";
+import type { ContextTurn, EvidenceLedger, TurnEvaluation } from "./types.ts";
 import {
   ledgerHasEvidenceForEveryDimension,
   ledgerHasType,
-} from "./evidence";
+} from "./evidence.ts";
 
 export class MachineTransitionError extends Error {
   constructor(message: string) {
