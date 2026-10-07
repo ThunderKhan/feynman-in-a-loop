@@ -343,6 +343,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
   }
 
+  const allContextTurns = (turnRows as StoredTurn[]).map((turn) => ({
+    id: turn.id,
+    sequence: turn.sequence,
+    role: turn.role,
+    interactionType: turn.interaction_type,
+    content: turn.content,
+  }));
+
   const input: TurnInput = {
     ...selected,
     learnerTurnId: learnerTurnId as string,
@@ -481,7 +489,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       currentStage: session.stage,
       proposal: validated.output.evaluation,
       mergedLedger: validated.mergedLedger,
-      contextTurns: selected.turns,
+      contextTurns: allContextTurns,
     });
   } catch (error) {
     await releaseClaim(user.id, sessionId, learnerTurnId as string);
