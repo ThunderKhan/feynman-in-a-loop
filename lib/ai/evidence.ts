@@ -3,8 +3,8 @@ import type {
   Dimension,
   EvidenceItem,
   EvidenceLedger,
-} from "@/lib/ai/types";
-import { EMPTY_LEDGER } from "@/lib/ai/types";
+} from "./types";
+import { EMPTY_LEDGER } from "./types";
 
 const DIMENSIONS: Dimension[] = [
   "coreIdea",
