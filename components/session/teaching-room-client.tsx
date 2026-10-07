@@ -31,6 +31,7 @@ export function TeachingRoomClient({
   initialStage,
   initialStudentState,
   initialTurns,
+  initialPending,
   completed,
 }: {
   sessionId: string;
@@ -38,13 +39,14 @@ export function TeachingRoomClient({
   initialStage: Stage;
   initialStudentState: StudentState;
   initialTurns: PublicTurn[];
+  initialPending: PendingTurn | null;
   completed: boolean;
 }) {
   const [turns, setTurns] = useState(initialTurns);
   const [stage, setStage] = useState(initialStage);
   const [studentState, setStudentState] = useState(initialStudentState);
   const [input, setInput] = useState("");
-  const [pending, setPending] = useState<PendingTurn | null>(null);
+  const [pending, setPending] = useState<PendingTurn | null>(initialPending);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -214,6 +216,19 @@ export function TeachingRoomClient({
 
         {!isCompleted ? (
           <form onSubmit={onSubmit} className="mx-auto mt-8 w-full max-w-2xl">
+            {pending && !busy && !error ? (
+              <div className="mb-3 flex items-center justify-between gap-4 rounded-xl border border-base-800 px-4 py-3 text-sm text-base-400">
+                <span>Your last teaching turn is saved and still needs a response.</span>
+                <button
+                  type="button"
+                  onClick={() => void submitTurn(pending)}
+                  className="flex shrink-0 items-center gap-1.5 text-xs text-base-200"
+                >
+                  <RotateCcw size={13} />
+                  Resume
+                </button>
+              </div>
+            ) : null}
             <label htmlFor="teaching-turn" className="sr-only">
               Type your teaching explanation
             </label>
