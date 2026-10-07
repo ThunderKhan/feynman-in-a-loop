@@ -10,7 +10,7 @@ revision: 4
 Derives from approved `scope.md` and `prd.md`. Product behavior is fixed there; this document only decides *how*.
 
 **Governing principles, preserved throughout:**
-> **Provider enforces shape; application enforces meaning and authority.**
+> **Provider enforces JSON structure where reliable; application always enforces exact shape, meaning, and authority.**
 >
 > **Persist the learner's evidence before depending on the model.**
 >
@@ -269,7 +269,7 @@ Implementations: `GroqProvider`, `OllamaProvider`, selected by `AI_PROVIDER`. **
 ### Validation Pipeline (`lib/ai/validate.ts`)
 Three independent gates. *Provider enforces shape; application enforces meaning and authority.*
 
-**Gate 1 — Shape (defensive).** Zod parse. Reject unknown keys, bad enums, oversized strings, malformed JSON. Under Groq strict mode this should not fire, because schema compliance is provider-enforced. It exists for the local/Ollama path, any future non-strict provider, and defense in depth. On failure: one repair retry, then fail closed. Never invent a valid result client-side.
+**Gate 1 — Shape (authoritative).** Zod parse. Reject unknown keys, bad enums, oversized strings, and malformed output. Normal Groq turns request `strict: true` JSON Schema. If that live endpoint returns a structured-generation 400, the single quota-accounted retry uses Groq JSON Object Mode to avoid repeating the same constrained-decoding failure; Zod then remains the exact shape authority. Ollama and any future non-strict path use the same Gate 1. After the one retry, fail closed. Never invent a valid result client-side.
 
 **Gate 2 — Meaning.**
 - every `turnId` belongs to this session **and** was present in the context actually sent;
@@ -634,7 +634,7 @@ feynman-in-a-loop/
 
 ## Important Failure Modes
 
-- **Groq returns output failing shape validation** → under `strict: true` this should not happen. If it does (or on the Ollama path), one repair retry, then fail closed. The learner turn is already persisted: "I couldn't respond right now. Your explanation is saved." Nothing lost, nothing invented.
+- **Groq strict structured output returns a 400 / failed generation** → consume the one allowed retry using JSON Object Mode, then run the same Zod + semantic + boundary gates. If that retry also fails, fail closed. The learner turn was already persisted before either provider call, so retry never creates new evidence.
 - **Groq exceeds 200K tokens/day** → 429 mapped to typed `quota_exhausted`. Specific quota message with **Try again** / **End session**. The free-tier daily reset is honest information for the user.
 - **Groq's evaluator section is semantically invalid** (ungrounded `turnId`, quote mismatch, `shouldComplete` without evidence) → Gate 2 rejects. State does not advance; recoverable error. This is what makes the evaluator *measuring* rather than *deciding*.
 - **Groq blends student and evaluator roles** → Gate 3 catches leaked diagnostic intent → exceptional repair regenerates only the student message. Persistent blending across the corpus is the signal to escalate to two calls or a larger model.
