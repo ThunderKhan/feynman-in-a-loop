@@ -14,12 +14,15 @@ import {
 } from "./evidence.ts";
 
 export class TurnValidationError extends Error {
+  readonly gate: "shape" | "meaning" | "boundary";
+
   constructor(
     message: string,
-    public readonly gate: "shape" | "meaning" | "boundary",
+    gate: "shape" | "meaning" | "boundary",
   ) {
     super(message);
     this.name = "TurnValidationError";
+    this.gate = gate;
   }
 }
 
