@@ -112,23 +112,23 @@ comment on table public.session_turns is
 
 -- One row per turn position within a session.
 -- Dropped before recreation so a rerun cannot preserve an outdated definition.
-drop index if exists session_turns_session_sequence_uidx on public.session_turns;
+drop index if exists public.session_turns_session_sequence_uidx;
 create unique index session_turns_session_sequence_uidx
   on public.session_turns (session_id, sequence);
 
 -- Idempotency: the same client_turn_id can never produce two learner turns.
-drop index if exists session_turns_client_turn_uidx on public.session_turns;
+drop index if exists public.session_turns_client_turn_uidx;
 create unique index session_turns_client_turn_uidx
   on public.session_turns (session_id, client_turn_id)
   where client_turn_id is not null;
 
 -- At most ONE student response per learner turn, enforced by the database.
-drop index if exists session_turns_one_response_uidx on public.session_turns;
+drop index if exists public.session_turns_one_response_uidx;
 create unique index session_turns_one_response_uidx
   on public.session_turns (responds_to_turn_id)
   where responds_to_turn_id is not null;
 
-drop index if exists session_turns_session_idx on public.session_turns;
+drop index if exists public.session_turns_session_idx;
 create index session_turns_session_idx
   on public.session_turns (session_id, sequence);
 
@@ -230,7 +230,15 @@ create trigger session_turns_reject_completed_parent
 create or replace function public.max_model_calls()
 returns integer
 language sql stable security invoker set search_path = ''
-as $$ select 8; $$;
+as $ select 8; $;
+
+-- Read-only helper used by diagnostics/tests. The authoritative per-session
+-- value lives in learning_sessions.claim_stale_after_seconds; this exposes the
+-- production default without granting any mutation capability.
+create or replace function public.claim_stale_after()
+returns interval
+language sql stable security invoker set search_path = ''
+as $ select make_interval(secs => 120); $;
 
 -- ===========================================================================
 -- MUTATION RPCs
