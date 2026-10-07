@@ -1,4 +1,4 @@
-import type { TurnInput } from "../types";
+import type { TurnInput } from "../types.ts";
 
 export const TURN_SYSTEM_PROMPT = `
 You are the learning kernel for Feynman-in-a-Loop.
