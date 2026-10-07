@@ -68,6 +68,20 @@ export function validateEvidenceItems(
       throw new Error("Mastery evidence must be grounded in a learner turn.");
     }
 
+    const typeMatches =
+      (item.type === "correction" &&
+        source.interactionType === "correction") ||
+      (item.type === "transfer_answer" &&
+        source.interactionType === "transfer_answer") ||
+      ((item.type === "explanation" || item.type === "probe") &&
+        source.interactionType === "explanation");
+
+    if (!typeMatches) {
+      throw new Error(
+        `Evidence type ${item.type} does not match authoritative learner-turn type ${source.interactionType}.`,
+      );
+    }
+
     if (item.quote) {
       const quote = normalizeWhitespace(item.quote);
       const content = normalizeWhitespace(source.content);
