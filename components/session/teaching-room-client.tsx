@@ -48,6 +48,8 @@ export function TeachingRoomClient({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isCompleted = completed || stage === "completed";
+
   const latestLearner = useMemo(
     () => [...turns].reverse().find((turn) => turn.role === "learner"),
     [turns],
@@ -133,7 +135,7 @@ export function TeachingRoomClient({
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = input.trim();
-    if (!content || busy || completed) return;
+    if (!content || busy || isCompleted) return;
 
     const turn = pending?.content === content
       ? pending
@@ -210,7 +212,7 @@ export function TeachingRoomClient({
           </section>
         </div>
 
-        {!completed ? (
+        {!isCompleted ? (
           <form onSubmit={onSubmit} className="mx-auto mt-8 w-full max-w-2xl">
             <label htmlFor="teaching-turn" className="sr-only">
               Type your teaching explanation
