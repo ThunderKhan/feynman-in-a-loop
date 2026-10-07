@@ -1,9 +1,9 @@
-import type { Stage } from "@/lib/types";
-import type { ContextTurn, EvidenceLedger, TurnEvaluation } from "@/lib/ai/types";
+import type { Stage } from "../types";
+import type { ContextTurn, EvidenceLedger, TurnEvaluation } from "./types";
 import {
   ledgerHasEvidenceForEveryDimension,
   ledgerHasType,
-} from "@/lib/ai/evidence";
+} from "./evidence";
 
 export class MachineTransitionError extends Error {
   constructor(message: string) {
