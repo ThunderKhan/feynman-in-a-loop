@@ -70,10 +70,18 @@ test("evidence referencing a turn outside model context fails meaning validation
   );
 });
 
-test("public student text cannot reveal the private target gap", () => {
+test("a diagnostic question may mention the concept without leaking evaluator metadata", () => {
+  const output = validOutput();
+  output.evaluation.targetGap = "why sorted order makes discarding a half sound";
+  output.student.message = "Why does sorted order let us safely discard one half?";
+
+  assert.doesNotThrow(() => validateTurnOutput(output, context));
+});
+
+test("public student text cannot reveal evaluator meta-diagnosis", () => {
   const output = validOutput();
   output.evaluation.targetGap = "sorted invariant";
-  output.student.message = "The sorted invariant is what I'm testing.";
+  output.student.message = "Your current gap is the sorted invariant.";
 
   assert.throws(
     () => validateTurnOutput(output, context),
