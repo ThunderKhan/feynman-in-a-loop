@@ -374,13 +374,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
       if (raced) return NextResponse.json(raced);
     }
 
+    const capReached = /cap reached/i.test(claim.error.message);
     return errorResponse(
       409,
-      "evaluation_not_claimable",
-      /cap reached/i.test(claim.error.message)
-        ? "This attempt has reached its model-call limit."
+      capReached ? "model_call_limit" : "evaluation_not_claimable",
+      capReached
+        ? "This attempt has reached its model-call safety limit. Start a fresh attempt to continue."
         : "This turn is already being evaluated. Try again shortly.",
-      true,
+      !capReached,
     );
   }
 
