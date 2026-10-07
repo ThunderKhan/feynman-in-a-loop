@@ -1,6 +1,6 @@
 import type { AIProvider } from "../provider.ts";
 import { AIProviderError } from "../errors.ts";
-import { buildTurnUserMessage, TURN_SYSTEM_PROMPT } from "../prompts/turn.ts";
+import { buildTurnUserMessage } from "../prompts/turn.ts";
 import { TURN_OUTPUT_JSON_SCHEMA } from "../schemas/turn.ts";
 import type { TurnInput, TurnOutput } from "../types.ts";
 
@@ -13,6 +13,7 @@ type GroqResponse = {
   }>;
   error?: {
     message?: string;
+    failed_generation?: string;
   };
 };
 
@@ -38,12 +39,15 @@ export class GroqProvider implements AIProvider {
         },
         body: JSON.stringify({
           model,
-          messages: [
-            { role: "system", content: TURN_SYSTEM_PROMPT },
-            { role: "user", content: buildTurnUserMessage(input) },
-          ],
-          reasoning_effort: "low",
-          max_completion_tokens: 1400,
+          // Groq's GPT-OSS reasoning guidance recommends putting all control
+          // instructions in one user message rather than a separate system
+          // prompt. Keeping the trusted rules and delimited learner data in a
+          // single message also avoids the schema failures we saw in the first
+          // 20B/120B benchmark.
+          messages: [{ role: "user", content: buildTurnUserMessage(input) }],
+          reasoning_effort: "medium",
+          reasoning_format: "hidden",
+          max_completion_tokens: 1800,
           stream: false,
           response_format: {
             type: "json_schema",
@@ -66,8 +70,15 @@ export class GroqProvider implements AIProvider {
     const body = (await response.json().catch(() => ({}))) as GroqResponse;
 
     if (!response.ok) {
+      const failedGeneration = body.error?.failed_generation
+        ?.replace(/\s+/g, " ")
+        .slice(0, 500);
+      const detail = failedGeneration
+        ? ` Failed generation: ${failedGeneration}`
+        : "";
+
       throw new AIProviderError(
-        body.error?.message ?? `Groq returned HTTP ${response.status}`,
+        (body.error?.message ?? `Groq returned HTTP ${response.status}`) + detail,
         "provider_rejected",
         response.status,
       );
