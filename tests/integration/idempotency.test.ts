@@ -97,7 +97,7 @@ test("a completed final turn can be replayed with the same clientTurnId after a 
     const applied = await applyResult(alice.client, {
       sessionId: sid,
       learnerTurnId: turnId,
-      stage: "assess",
+      stage: "completed",
       complete: true,
       studentState: "mastered",
       message: "I think I get it now.",
