@@ -48,8 +48,11 @@ export class GroqProvider implements AIProvider {
           reasoning_effort: "medium",
           reasoning_format: "hidden",
           max_completion_tokens: 2600,
-          temperature: 0.6,
-          top_p: 0.95,
+          // Evaluation should be stable across repeated runs; keep sampling
+          // deliberately low while retaining enough variation for natural
+          // student wording.
+          temperature: 0.2,
+          top_p: 1,
           stream: false,
           response_format: {
             type: "json_schema",
