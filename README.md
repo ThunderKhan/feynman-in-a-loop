@@ -10,7 +10,7 @@ Instead of using AI as the tutor, the learner becomes the teacher. The AI behave
 
 **Implementation in progress.**
 
-Scope, PRD, and technical spec are approved. Slice 1 (Next.js + Supabase auth/session shell) is live-verified; Slice 2 is implementing and verifying the database invariants before the AI kernel is wired in. Groq is the selected hosted AI provider, with the exact GPT-OSS model still determined by the Slice 3 benchmark.
+Scope, PRD, and technical spec are approved. Slice 1 (Next.js + Supabase auth/session shell) is live-verified; Slice 2 is implementing and verifying the database invariants before the AI kernel is wired in. Groq is the selected hosted AI provider, with **GPT-OSS 120B** chosen by the Slice 3 benchmark; the text-learning kernel is now ready for live end-to-end verification.
 
 ## Core loop
 
