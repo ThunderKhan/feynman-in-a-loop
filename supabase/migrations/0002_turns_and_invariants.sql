@@ -174,6 +174,30 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Stale-claim window.
+--
+-- A server process can die after claiming a turn but before releasing it. That
+-- turn would otherwise be stuck in 'claimed' forever, and the concurrency
+-- guard would read the dead claim as "evaluation still in flight".
+--
+-- A claim older than this window is considered abandoned and may be stolen.
+-- The window must comfortably exceed a slow provider call so a genuinely
+-- in-flight evaluation is never mistaken for a dead one. Trade-off: a call
+-- that outlives the window can be evaluated twice, which costs quota — but the
+-- unique index on responds_to_turn_id still guarantees exactly one applied
+-- student response per learner turn.
+-- ---------------------------------------------------------------------------
+create or replace function public.claim_stale_after()
+returns interval
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select interval '2 minutes';
+$$;
+
+-- ---------------------------------------------------------------------------
 -- 1. append_learner_turn
 --
 -- Idempotent insert of a completed learner turn.
@@ -308,20 +332,95 @@ begin
       using errcode = 'check_violation';
   end if;
 
-  -- Mark the turn claimed. Conditional on 'pending', so a second concurrent
-  -- claim for the same turn matches no row and is refused.
+  -- Mark the turn claimed. Conditional, so a second concurrent claim for the same
+-- turn matches no row and is refused.
+--
+-- Two ways to be claimable:
+--   pending                       — never claimed
+--   claimed AND older than stale window — abandoned by a dead process
+--
+-- 'applied' matches neither, so a completed evaluation can never be re-run.
   update public.session_turns t
      set evaluation_state = 'claimed',
          evaluation_claimed_at = now()
    where t.id = p_learner_turn_id
      and t.session_id = p_session_id
      and t.role = 'learner'
-     and t.evaluation_state = 'pending';
+     and (
+          t.evaluation_state = 'pending'
+          or (
+            t.evaluation_state = 'claimed'
+            and t.evaluation_claimed_at < now() - public.claim_stale_after()
+          )
+     );
 
   get diagnostics v_updated = row_count;
 
   if v_updated = 0 then
     raise exception 'learner turn is not claimable'
+      using errcode = 'check_violation';
+  end if;
+
+  return true;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- release_model_call
+--
+-- Returns a claimed learner turn to 'pending' so Try again can resume it.
+--
+-- The consumed allowance is deliberately NOT refunded: a provider call was
+-- genuinely made and genuinely spent quota. Retrying therefore performs a
+-- fresh claim and consumes a further allowance, which is the honest cost of a
+-- transient failure.
+-- ---------------------------------------------------------------------------
+create or replace function public.release_model_call(
+  p_session_id      uuid,
+  p_learner_turn_id uuid
+)
+returns boolean
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_session public.learning_sessions%rowtype;
+  v_updated integer;
+begin
+  select * into v_session
+    from public.learning_sessions s
+   where s.id = p_session_id
+     for update;
+
+  if not found then
+    raise exception 'session not found or not accessible'
+      using errcode = 'no_data_found';
+  end if;
+
+  if v_session.user_id <> auth.uid() then
+    raise exception 'not your session' using errcode = 'insufficient_privilege';
+  end if;
+
+  if v_session.status <> 'in_progress' then
+    raise exception 'session is completed and immutable'
+      using errcode = 'check_violation';
+  end if;
+
+  -- Only a claimed turn can be released. An 'applied' turn is a finished
+  -- evaluation and is never released back into the queue.
+  update public.session_turns t
+     set evaluation_state = 'pending',
+         evaluation_claimed_at = null
+   where t.id = p_learner_turn_id
+     and t.session_id = p_session_id
+     and t.role = 'learner'
+     and t.evaluation_state = 'claimed';
+
+  get diagnostics v_updated = row_count;
+
+  if v_updated = 0 then
+    raise exception 'learner turn is not in a releasable state'
       using errcode = 'check_violation';
   end if;
 
@@ -392,9 +491,18 @@ begin
       using errcode = 'no_data_found';
   end if;
 
+  -- An applied turn is a finished evaluation and is never re-run.
   if v_state = 'applied' then
     raise exception 'learner turn already has an applied response'
       using errcode = 'unique_violation';
+  end if;
+
+  -- A result may only be applied to a turn that actually consumed allowance.
+  -- This keeps "claim before the provider" from being bypassable by applying
+  -- straight from 'pending', which would cost no quota at all.
+  if v_state <> 'claimed' then
+    raise exception 'learner turn must be claimed before a result is applied'
+      using errcode = 'check_violation';
   end if;
 
   select coalesce(max(t.sequence), 0) + 1 into v_sequence
@@ -441,9 +549,12 @@ $$;
 -- ---------------------------------------------------------------------------
 revoke execute on function public.append_learner_turn(uuid, uuid, text, text) from public;
 revoke execute on function public.claim_model_call(uuid, uuid) from public;
+revoke execute on function public.release_model_call(uuid, uuid) from public;
 revoke execute on function public.apply_turn_result(uuid, uuid, text, text, text, text, jsonb, jsonb, boolean, jsonb) from public;
 
 grant execute on function public.append_learner_turn(uuid, uuid, text, text) to authenticated;
 grant execute on function public.claim_model_call(uuid, uuid) to authenticated;
+grant execute on function public.release_model_call(uuid, uuid) to authenticated;
 grant execute on function public.apply_turn_result(uuid, uuid, text, text, text, text, jsonb, jsonb, boolean, jsonb) to authenticated;
 grant execute on function public.max_model_calls() to authenticated;
+grant execute on function public.claim_stale_after() to authenticated;

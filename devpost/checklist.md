@@ -114,6 +114,9 @@ Activity mode:
 
 ## Revisions
 
+- **Retry lifecycle added to `claim_model_call` (learner-found, pre-application)** — the original guard matched only `pending`, so a turn stuck in `claimed` after a provider failure could never be retried: the concurrency guard read the dead claim as "evaluation still in flight". Fixed with `release_model_call()` (claimed → pending, allowance deliberately NOT refunded), a stale-claim window (`claim_stale_after()`, 2 minutes) so a process that dies after claiming cannot strand a turn forever, and coverage of all six required lifecycle cases. Caught before `0002` was applied.
+- **`apply_turn_result` now requires the turn to be `claimed`** — found while fixing the above. It previously accepted a `pending` turn, which meant "claim before the provider" was bypassable by applying straight from `pending` at zero quota cost.
+
 - **`cacheComponents` and `partialPrefetching` disabled** (Next 16 scaffold default) — every page in this app is auth-dependent and therefore inherently dynamic (`cookies()`, `getClaims()`), and forcing partial prerendering around that adds Suspense ceremony with no benefit at PoC scale. Also forced by the framework: `partialPrefetching` errors out if `cacheComponents` is off. Re-enable later if caching becomes a real need.
 - **`getClaims()` returns a decoded JWT, not a user record** — the spec assumed `{ user }` would be available. Identity is therefore derived from the verified `sub` claim via `lib/auth.ts`. Signature validation is unaffected; this is strictly the documented security posture.
 - **Server Actions used for auth and session creation** instead of dedicated API routes. Same trust boundary (they run server-side), fewer files, progressive enhancement for free. The turn endpoint in slice 3 remains a route handler because it needs custom request/response control.

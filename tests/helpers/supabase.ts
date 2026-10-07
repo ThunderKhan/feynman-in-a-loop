@@ -212,6 +212,53 @@ export async function claimCall(
   return { ok: !error, error: error?.message ?? null, data };
 }
 
+/**
+ * Returns a claimed turn to 'pending' so it can be retried.
+ *
+ * The consumed allowance is NOT refunded: a provider call was genuinely spent.
+ * A retry must therefore claim again, consuming a further allowance.
+ */
+export async function releaseCall(
+  client: SupabaseClient,
+  sessionId: string,
+  turnId: string,
+) {
+  const { data, error } = await client.rpc("release_model_call", {
+    p_session_id: sessionId,
+    p_learner_turn_id: turnId,
+  });
+  return { ok: !error, error: error?.message ?? null, data };
+}
+
+/**
+ * Backdates evaluation_claimed_at to simulate a process that died after
+ * claiming and never released.
+ *
+ * Possible because RLS lets a user update their own turns; in the application
+ * nothing does this. Worst a caller could achieve is wasting their own quota.
+ */
+export async function backdateClaim(
+  client: SupabaseClient,
+  turnId: string,
+  minutesAgo = 10,
+) {
+  const { error } = await client
+    .from("session_turns")
+    .update({ evaluation_claimed_at: new Date(Date.now() - minutesAgo * 60_000).toISOString() })
+    .eq("id", turnId);
+  return { ok: !error, error: error?.message ?? null };
+}
+
+/** The configured stale-claim window, in seconds. */
+export async function staleWindowSeconds(client: SupabaseClient) {
+  const { data } = await client.rpc("claim_stale_after");
+  const interval = String(data);
+  const match = interval.match(/^00:0?2:00|(\d+):(\d+):(\d+)/);
+  if (!match) return null;
+  const [, , m, s] = match;
+  return Number(m ?? 0) * 60 + Number(s ?? 0);
+}
+
 export async function applyResult(
   client: SupabaseClient,
   args: {
