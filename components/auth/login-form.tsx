@@ -36,24 +36,29 @@ export function LoginForm({ action }: { action: AuthAction }) {
           </p>
         </div>
 
-        <div className="relative z-10 flex flex-1 items-center justify-center px-10 py-16">
-          <div
-            className="relative flex aspect-[4/3] w-full max-w-2xl items-center justify-center overflow-hidden rounded-[2rem] border border-white/[0.08] bg-white/[0.025]"
-            aria-label="Artwork placeholder"
-          >
-            <div className="absolute inset-8 rounded-[1.5rem] border border-dashed border-white/[0.08]" />
-            <div className="max-w-sm text-center">
+        <div className="relative z-10 flex flex-1 items-center justify-center px-10 py-12">
+          <div className="w-full max-w-2xl overflow-hidden rounded-[2rem] border border-white/[0.08] bg-white/[0.025] shadow-[0_24px_90px_rgba(0,0,0,0.32)]">
+            <div className="relative aspect-[4/3] overflow-hidden bg-base-950">
+              <div
+                role="img"
+                aria-label="ASCII-style artwork of Richard Feynman teaching at a chalkboard"
+                className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+                style={{
+                  backgroundImage:
+                    'url("/images/auth/feynman-ascii.svg")',
+                }}
+              />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-base-950/45 via-transparent to-white/[0.02]" />
+            </div>
+
+            <div className="border-t border-white/[0.08] px-6 py-5">
               <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-base-600">
-                Visual study
+                The Feynman technique
               </p>
-              <p className="mt-4 font-editorial text-3xl leading-tight text-base-200">
+              <p className="mt-3 font-editorial text-2xl leading-tight text-base-200">
                 Teach another mind.
                 <br />
                 Find the gaps in yours.
-              </p>
-              <p className="mx-auto mt-5 max-w-xs text-sm leading-6 text-base-400">
-                The final ASCII artwork will live here without changing the
-                sign-in layout.
               </p>
             </div>
           </div>
