@@ -1,8 +1,8 @@
-import type { AIProvider } from "../provider";
-import { AIProviderError } from "../errors";
-import { buildTurnUserMessage, TURN_SYSTEM_PROMPT } from "../prompts/turn";
-import { TURN_OUTPUT_JSON_SCHEMA } from "../schemas/turn";
-import type { TurnInput, TurnOutput } from "../types";
+import type { AIProvider } from "../provider.ts";
+import { AIProviderError } from "../errors.ts";
+import { buildTurnUserMessage, TURN_SYSTEM_PROMPT } from "../prompts/turn.ts";
+import { TURN_OUTPUT_JSON_SCHEMA } from "../schemas/turn.ts";
+import type { TurnInput, TurnOutput } from "../types.ts";
 
 type GroqResponse = {
   choices?: Array<{
