@@ -6,6 +6,7 @@ import {
   TurnValidationError,
 } from "../../lib/ai/validate.ts";
 import { EMPTY_LEDGER } from "../../lib/ai/types.ts";
+import type { TurnOutput } from "../../lib/ai/types.ts";
 
 const turnId = "11111111-1111-4111-8111-111111111111";
 const context = {
@@ -22,7 +23,7 @@ const context = {
   existingLedger: EMPTY_LEDGER,
 };
 
-function validOutput() {
+function validOutput(): TurnOutput {
   return {
     evaluation: {
       stage: "diagnose",
