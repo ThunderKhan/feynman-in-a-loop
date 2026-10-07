@@ -49,10 +49,14 @@ for (const model of models) {
         latencyMs: Math.round(performance.now() - started),
       });
     } catch (error) {
+      const checks = Object.fromEntries(
+        benchmark.criteria.map((criterion) => [criterion, false]),
+      );
+
       caseResults.push({
         caseId: benchmark.id,
         valid: false,
-        checks: { schemaAndBoundary: false },
+        checks,
         error: error instanceof Error ? error.message : String(error),
         latencyMs: Math.round(performance.now() - started),
       });
