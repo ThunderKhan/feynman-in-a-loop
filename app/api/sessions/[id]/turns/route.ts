@@ -76,7 +76,7 @@ async function releaseClaim(
     p_learner_turn_id: learnerTurnId,
   });
 
-  if (error) {
+  if (error && !/not in a releasable state/i.test(error.message)) {
     console.error("Failed to release model claim", {
       sessionId,
       learnerTurnId,
@@ -147,24 +147,13 @@ async function fullRetry(args: {
     throw new Error(`Could not claim validation retry: ${retryClaim.error.message}`);
   }
 
-  let raw: TurnOutput;
-  try {
-    raw = await callProvider({
-      ...args.input,
-      mode: "retry",
-      retryReason: args.reason,
-    });
-  } catch (error) {
-    await releaseClaim(args.userId, args.sessionId, args.learnerTurnId);
-    throw error;
-  }
+  const raw = await callProvider({
+    ...args.input,
+    mode: "retry",
+    retryReason: args.reason,
+  });
 
-  try {
-    return validateTurnOutput(raw, args.validationContext);
-  } catch (error) {
-    await releaseClaim(args.userId, args.sessionId, args.learnerTurnId);
-    throw error;
-  }
+  return validateTurnOutput(raw, args.validationContext);
 }
 
 async function repairStudentOnly(args: {
@@ -186,22 +175,15 @@ async function repairStudentOnly(args: {
     throw new Error(`Could not claim student-response repair: ${retryClaim.error.message}`);
   }
 
-  let raw: TurnOutput;
-  try {
-    raw = await callProvider({
-      ...args.input,
-      mode: "student_repair",
-      retryReason: args.reason,
-      fixedEvaluation: args.validated.output.evaluation,
-    });
-  } catch (error) {
-    await releaseClaim(args.userId, args.sessionId, args.learnerTurnId);
-    throw error;
-  }
+  const raw = await callProvider({
+    ...args.input,
+    mode: "student_repair",
+    retryReason: args.reason,
+    fixedEvaluation: args.validated.output.evaluation,
+  });
 
   const parsed = TurnOutputSchema.safeParse(raw);
   if (!parsed.success) {
-    await releaseClaim(args.userId, args.sessionId, args.learnerTurnId);
     throw new TurnValidationError(
       "Student-response repair returned malformed structured output.",
       "shape",
@@ -213,12 +195,7 @@ async function repairStudentOnly(args: {
     student: parsed.data.student,
   };
 
-  try {
-    validateStudentBoundary(repaired);
-  } catch (error) {
-    await releaseClaim(args.userId, args.sessionId, args.learnerTurnId);
-    throw error;
-  }
+  validateStudentBoundary(repaired);
 
   return {
     output: repaired,
@@ -481,6 +458,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
     await releaseClaim(user.id, sessionId, learnerTurnId as string);
 
     if (error instanceof AIProviderError) {
+      console.warn("AI provider turn failed", {
+        sessionId,
+        learnerTurnId,
+        code: error.code,
+        status: error.status ?? null,
+      });
       const status =
         error.code === "provider_not_configured"
           ? 503
@@ -501,6 +484,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
       error instanceof TurnValidationError ||
       error instanceof MachineTransitionError
     ) {
+      console.warn("AI turn validation failed", {
+        sessionId,
+        learnerTurnId,
+        kind:
+          error instanceof TurnValidationError
+            ? `validation:${error.gate}`
+            : "machine_transition",
+        message: error.message,
+      });
       return errorResponse(
         502,
         "invalid_ai_output",
