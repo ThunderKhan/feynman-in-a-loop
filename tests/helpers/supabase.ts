@@ -259,6 +259,18 @@ export async function assertSchemaReady(client: SupabaseClient) {
         `probe returned ${probe.error?.message ?? "no error"}`,
     );
   }
+
+  const columnProbe = await client
+    .from("learning_sessions")
+    .select("active_target_gap")
+    .limit(1);
+  if (columnProbe.error) {
+    throw new Error(
+      "Slice 3 schema is not applied. Run " +
+        "supabase/migrations/0003_ai_kernel_state.sql in the Supabase SQL Editor. " +
+        `active_target_gap probe returned: ${columnProbe.error.message}`,
+    );
+  }
 }
 
 /** Best-effort server-only cleanup of a session created by a test. */
@@ -336,6 +348,7 @@ export async function applyResult(
     evidenceLedger?: Record<string, unknown[]>;
     complete?: boolean;
     masteryResult?: Record<string, unknown>;
+    targetGap?: string | null;
   },
 ) {
   const { data, error } = await serverRpc(client, "apply_turn_result", {
@@ -347,6 +360,7 @@ export async function applyResult(
     p_stage: args.stage ?? "repair",
     p_mastery: args.mastery ?? {},
     p_evidence_ledger: args.evidenceLedger ?? {},
+    p_target_gap: args.targetGap ?? null,
     p_complete: args.complete ?? false,
     p_mastery_result: args.masteryResult ?? null,
   });
