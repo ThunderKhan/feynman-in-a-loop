@@ -279,20 +279,20 @@ test("a user cannot insert a learner turn directly", async () => {
   }
 });
 
-test("a user cannot delete their own session directly (delete goes through the RPC)", async () => {
+test("a user cannot delete their own session through the browser", async () => {
   const sid = await createSession(alice.client, "Binary Search");
   try {
     const { error } = await alice.client.from("learning_sessions").delete().eq("id", sid);
     assert.ok(error, "direct delete must be rejected");
 
-    // Still readable, so the delete did not take effect.
-    assert.ok((await readSession(alice.client, sid)).data);
+    // Deletion is not an MVP product mutation, so there is deliberately no
+    // authenticated delete_session RPC to fall back to.
+    const rpc = await alice.client.rpc("delete_session", { p_session_id: sid });
+    assert.ok(rpc.error, "no browser-facing delete RPC should exist");
 
-    // The authorized path still works.
+    assert.ok((await readSession(alice.client, sid)).data, "attempt must still exist");
+  } finally {
     await cleanupSession(alice.client, sid);
-    assert.equal((await readSession(alice.client, sid)).data, null);
-  } catch (e) {
-    throw e;
   }
 });
 
@@ -392,7 +392,7 @@ test("one user still cannot mutate another user's rows", async () => {
     assert.ok(adminClaim.error, "server-only RPC must still enforce row ownership");
 
     const del = await bob.client.rpc("delete_session", { p_session_id: sid });
-    assert.ok(del.error, "cross-user delete must be refused");
+    assert.ok(del.error, "no browser-facing delete RPC should exist");
 
     assert.ok((await readSession(alice.client, sid)).data, "session must survive");
   } finally {
