@@ -1,17 +1,17 @@
-import { TurnOutputSchema } from "./schemas/turn";
+import { TurnOutputSchema } from "./schemas/turn.ts";
 import type {
   Dimension,
   EvidenceLedger,
   TurnOutput,
   ValidationContext,
   ValidationResult,
-} from "./types";
+} from "./types.ts";
 import {
   ledgerHasEvidenceForEveryDimension,
   ledgerHasType,
   mergeEvidenceLedger,
   validateEvidenceItems,
-} from "./evidence";
+} from "./evidence.ts";
 
 export class TurnValidationError extends Error {
   constructor(
