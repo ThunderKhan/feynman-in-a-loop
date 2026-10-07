@@ -173,7 +173,7 @@ export const TURN_OUTPUT_JSON_SCHEMA = {
           },
         },
         targetGap: {
-          anyOf: [{ type: "string", maxLength: 160 }, { type: "null" }],
+          anyOf: [{ type: "string" }, { type: "null" }],
         },
         nextAction: {
           type: "string",
@@ -189,7 +189,6 @@ export const TURN_OUTPUT_JSON_SCHEMA = {
         shouldComplete: { type: "boolean" },
         evidence: {
           type: "array",
-          maxItems: 8,
           items: {
             type: "object",
             additionalProperties: false,
@@ -214,9 +213,9 @@ export const TURN_OUTPUT_JSON_SCHEMA = {
                   "transfer_answer",
                 ],
               },
-              summary: { type: "string", maxLength: 280 },
+              summary: { type: "string" },
               quote: {
-                anyOf: [{ type: "string", maxLength: 160 }, { type: "null" }],
+                anyOf: [{ type: "string" }, { type: "null" }],
               },
             },
           },
@@ -242,7 +241,7 @@ export const TURN_OUTPUT_JSON_SCHEMA = {
             "error",
           ],
         },
-        message: { type: "string", maxLength: 280 },
+        message: { type: "string" },
       },
     },
   },
