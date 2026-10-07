@@ -1,4 +1,4 @@
-import type { TurnInput, ValidationContext } from "../../lib/ai/types.ts";
+import type { TurnInput, TurnOutput, ValidationContext } from "../../lib/ai/types.ts";
 import { EMPTY_LEDGER, EMPTY_MASTERY } from "../../lib/ai/types.ts";
 
 const ids = {
@@ -13,10 +13,7 @@ export type BenchmarkCase = {
   label: string;
   input: TurnInput;
   validation: ValidationContext;
-  score: (output: {
-    evaluation: TurnInput["fixedEvaluation"] extends never ? never : any;
-    student: { message: string };
-  }) => Record<string, boolean>;
+  score: (output: TurnOutput) => Record<string, boolean>;
 };
 
 const gapTurns = [
