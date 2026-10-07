@@ -19,8 +19,8 @@
 --
 -- Therefore:
 --   * authenticated gets SELECT only on both tables. No INSERT/UPDATE/DELETE.
---   * create_session / delete_session / append_learner_turn are the only
---     authenticated mutation RPCs; they derive identity from auth.uid().
+--   * create_session / append_learner_turn are the only authenticated
+--     mutation RPCs; they derive identity from auth.uid().
 --   * claim/release/apply and the stale-window test hook are executable only
 --     by service_role (the server-only Supabase secret-key path) and take the
 --     already-verified user id explicitly.
@@ -250,7 +250,7 @@ as $$ select make_interval(secs => 120); $$;
 -- ===========================================================================
 -- MUTATION RPCs
 --
--- Browser-safe RPCs (create/delete/append) are SECURITY DEFINER because the
+-- Browser-safe RPCs (create/append) are SECURITY DEFINER because the
 -- authenticated role has no direct table write privileges. They derive
 -- identity from auth.uid() and verify ownership.
 --
@@ -296,40 +296,9 @@ begin
 end;
 $$;
 
--- ---------------------------------------------------------------------------
--- delete_session
---
--- Owner-only deletion. Exists so the integration suite can clean up after
--- itself, and as a reasonable future affordance for a learner removing their
--- own attempt.
--- ---------------------------------------------------------------------------
-create or replace function public.delete_session(p_session_id uuid)
-returns boolean
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_user uuid := auth.uid();
-  v_deleted integer;
-begin
-  if v_user is null then
-    raise exception 'not authenticated' using errcode = 'insufficient_privilege';
-  end if;
-
-  delete from public.learning_sessions s
-   where s.id = p_session_id
-     and s.user_id = v_user;
-
-  get diagnostics v_deleted = row_count;
-
-  if v_deleted = 0 then
-    raise exception 'session not found or not yours' using errcode = 'no_data_found';
-  end if;
-
-  return true;
-end;
-$$;
+-- No browser-facing delete RPC: completed attempts are immutable evidence and
+-- deletion is not an MVP product action. Remove any partially-created dev copy.
+drop function if exists public.delete_session(uuid);
 
 -- Remove legacy client-callable development signatures so reruns cannot leave
 -- an insecure overload behind.
@@ -761,11 +730,9 @@ $$;
 -- Grants
 -- ---------------------------------------------------------------------------
 revoke execute on function public.create_session(text) from public, anon;
-revoke execute on function public.delete_session(uuid) from public, anon;
 revoke execute on function public.append_learner_turn(uuid, uuid, text, text) from public, anon;
 
 grant execute on function public.create_session(text) to authenticated;
-grant execute on function public.delete_session(uuid) to authenticated;
 grant execute on function public.append_learner_turn(uuid, uuid, text, text) to authenticated;
 
 revoke execute on function public.set_claim_stale_after(uuid, uuid, integer) from public, anon, authenticated;
