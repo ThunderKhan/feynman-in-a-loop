@@ -241,11 +241,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const { id: sessionId } = await context.params;
   const supabase = await createClient();
+  const serverDb = createAdminClient();
 
-  const { data: sessionRow, error: sessionError } = await supabase
+  // Private evaluator columns are intentionally not SELECT-able through the
+  // authenticated/browser role. The trusted route uses the server-only client
+  // and re-applies ownership explicitly after verifying the JWT above.
+  const { data: sessionRow, error: sessionError } = await serverDb
     .from("learning_sessions")
     .select("*")
     .eq("id", sessionId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (sessionError || !sessionRow) {
@@ -307,10 +312,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   // Refresh the session after persistence in case another request completed or
   // advanced it while this request was waiting.
-  const { data: freshSession } = await supabase
+  const { data: freshSession } = await serverDb
     .from("learning_sessions")
     .select("*")
     .eq("id", sessionId)
+    .eq("user_id", user.id)
     .single();
   if (freshSession) session = freshSession as LearningSession;
 
@@ -356,10 +362,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (claim.error) {
     // A racing request may have applied the response between our earlier
     // idempotency check and this claim attempt.
-    const { data: latestSession } = await supabase
+    const { data: latestSession } = await serverDb
       .from("learning_sessions")
       .select("*")
       .eq("id", sessionId)
+      .eq("user_id", user.id)
       .single();
     if (latestSession) {
       const raced = await existingPublicResponse(
@@ -502,8 +509,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       ? validated.output.evaluation.targetGap
       : null;
 
-  const admin = createAdminClient();
-  const { data: applied, error: applyError } = await admin.rpc(
+  const { data: applied, error: applyError } = await serverDb.rpc(
     "apply_turn_result",
     {
       p_user_id: user.id,
@@ -525,10 +531,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   if (applyError) {
     // If another request won the race, return the already-persisted response.
-    const { data: latestSession } = await supabase
+    const { data: latestSession } = await serverDb
       .from("learning_sessions")
       .select("*")
       .eq("id", sessionId)
+      .eq("user_id", user.id)
       .single();
 
     if (latestSession) {
