@@ -3,6 +3,7 @@ export class AIProviderError extends Error {
     | "provider_unavailable"
     | "provider_rejected"
     | "invalid_provider_response"
+    | "structured_output_failure"
     | "provider_not_configured";
   readonly status?: number;
 
