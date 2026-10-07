@@ -43,9 +43,6 @@ function normalizeForLeakCheck(value: string) {
 
 export function validateStudentBoundary(output: TurnOutput) {
   const message = normalizeForLeakCheck(output.student.message);
-  const targetGap = output.evaluation.targetGap
-    ? normalizeForLeakCheck(output.evaluation.targetGap)
-    : null;
 
   if (output.student.state !== output.evaluation.studentState) {
     throw new TurnValidationError(
@@ -54,17 +51,10 @@ export function validateStudentBoundary(output: TurnOutput) {
     );
   }
 
-  if (
-    targetGap &&
-    targetGap.length >= 5 &&
-    (message.includes(targetGap) || targetGap.includes(message))
-  ) {
-    throw new TurnValidationError(
-      "Public student response leaks the private target gap.",
-      "boundary",
-    );
-  }
-
+  // A good diagnostic question will naturally use some of the same concept
+  // words as the private target gap. That is not a leak. What must remain
+  // hidden is the evaluator's *meta-diagnosis* ("your gap is...", "I'm
+  // testing whether...", mastery/scoring language, etc.).
   const forbidden = [
     /\bmaster(?:y|ed)?\b/i,
     /\b(?:weak|partial)\b/i,
@@ -73,6 +63,9 @@ export function validateStudentBoundary(output: TurnOutput) {
     /let me check if you understand/i,
     /to assess your/i,
     /your understanding is/i,
+    /your (?:main |current )?(?:gap|weakness|missing piece) is/i,
+    /you (?:haven't|have not) (?:shown|demonstrated|proved)/i,
+    /i noticed (?:that )?you (?:missed|didn't|did not|haven't|have not)/i,
     /evaluator/i,
     /system prompt/i,
     /target gap/i,
