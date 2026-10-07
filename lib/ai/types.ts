@@ -3,7 +3,7 @@ import type {
   MasteryDimensions,
   Stage,
   StudentState,
-} from "../types";
+} from "../types.ts";
 
 export type Dimension =
   | "coreIdea"
