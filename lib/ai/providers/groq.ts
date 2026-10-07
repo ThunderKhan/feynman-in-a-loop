@@ -20,7 +20,11 @@ type GroqResponse = {
 export const GROQ_PRODUCTION_MODEL = "openai/gpt-oss-120b" as const;
 
 export class GroqProvider implements AIProvider {
-  constructor(private readonly model: string = GROQ_PRODUCTION_MODEL) {}
+  private readonly model: string;
+
+  constructor(model: string = GROQ_PRODUCTION_MODEL) {
+    this.model = model;
+  }
 
   async completeTurn(input: TurnInput): Promise<TurnOutput> {
     const apiKey = process.env.GROQ_API_KEY;
