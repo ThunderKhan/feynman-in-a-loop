@@ -160,13 +160,6 @@ export async function createTestUser(label: string): Promise<TestUser> {
   return { ...entry, client, userId: data.user!.id };
 }
 
-/** A second client for the same user, sharing no in-memory session state. */
-export function freshClientFor(user: TestUser): SupabaseClient {
-  return createClient(SUPABASE_URL!, SUPABASE_PUBLISHABLE_KEY!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
 /**
  * Signs in as an EXISTING user. Use this to prove a stolen/spoofed session
  * cannot do anything, since identity comes from verified JWT claims only.
