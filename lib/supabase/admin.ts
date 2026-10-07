@@ -1,5 +1,7 @@
-import "server-only";
 import { createClient } from "@supabase/supabase-js";
+
+// This module must only be imported by server routes/actions/tests. The secret
+// key is intentionally not NEXT_PUBLIC_ and must never cross a client boundary.
 
 /**
  * Server-only Supabase client for authoritative evaluator/quota mutations.
