@@ -2,7 +2,7 @@
 doc: spec
 status: approved
 approved: 2026-10-07
-revision: 2
+revision: 3
 ---
 
 # Feynman-in-a-Loop — Technical Spec
@@ -142,18 +142,19 @@ Request-in/response-out is one round trip. **No streaming.** Streaming would imp
 **Environment variables:**
 
 ```
-# .env.local — never commit. No service-role key: the normal application
-# path uses the publishable key plus the authenticated user's session,
-# so RLS remains the authorization boundary.
+# .env.local — never commit.
+# Reads use the publishable key + authenticated user's session (RLS).
+# Authoritative evaluator/quota writes use a SERVER-ONLY Supabase secret key.
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=          # SERVER ONLY — never NEXT_PUBLIC_
 GROQ_API_KEY=                 # SERVER ONLY
 AI_PROVIDER=groq              # groq | ollama
 GROQ_MODEL=                   # set after benchmark
 OLLAMA_BASE_URL=http://localhost:11434   # dev only
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY` is **deliberately absent**. It is not required by any operation in this design, and it bypasses RLS. Add it only if implementation discovers a genuinely administrative need — and that would be a spec revision, not a convenience.
+**Revision 3 security correction.** Implementation exposed a contradiction in the earlier design: if `apply_turn_result` is executable by `authenticated`, a browser with a valid user JWT can call it directly and forge stage/mastery/evidence without passing through the Next.js validation pipeline. The fix is a server-only Supabase secret key (`SUPABASE_SECRET_KEY`) used only for evaluator/quota RPCs. Reads still use the normal authenticated client and RLS. The secret key never reaches browser code.
 
 `.env.example` ships with placeholders only. No private secret uses a `NEXT_PUBLIC_` prefix except Supabase's publishable key, which is designed to be public.
 
@@ -321,20 +322,15 @@ Owns the full ordered flow in **The Core Journey** step 5, including learner-tur
 
 ### Database Operations (`supabase/migrations/*.sql`)
 
-Two security-sensitive operations, both real atomic Postgres functions, neither a service-role bypass.
+The database has **two mutation classes**.
 
-#### Authorization semantics — applies to both
+**User-originated mutations** — `create_session`, `delete_session`, and `append_learner_turn` — are narrow `SECURITY DEFINER` RPCs executable by `authenticated`. Direct INSERT/UPDATE/DELETE privileges on the tables remain revoked. These functions derive identity from `auth.uid()`, perform ownership/state checks, and pin `search_path`.
 
-Both functions are **`SECURITY INVOKER`**. They execute with the calling user's privileges, so **RLS remains the authorization boundary** and neither function can read or write a row the authenticated user does not own. They are ordinary client-callable RPCs, not privileged backdoors.
+**Evaluator/quota mutations** — `claim_model_call`, `release_model_call`, `apply_turn_result`, and the stale-window test hook — are **server-only**. They are `SECURITY INVOKER` functions executable only by `service_role`; the browser's `authenticated` role has no EXECUTE privilege on them. The Next.js route first verifies the user's JWT with the normal SSR client, then uses the server-only Supabase secret key and passes the already-verified user id. Each RPC still compares that id with row ownership before mutating.
 
-**`SECURITY DEFINER` is not used, and must not be added to make an RLS problem disappear.** Should implementation ever identify a concrete reason a function requires it, that is a deliberate spec and security review requiring all of:
+This split is deliberate: RLS protects browser reads, but RLS cannot distinguish "the same authenticated user's browser" from "the Next.js server acting with that user's JWT." Without a server-only credential, a user could invoke `apply_turn_result` directly and forge authoritative learning state.
 
-- explicit ownership checks inside the function body;
-- a fixed, safe `search_path`;
-- restricted `EXECUTE` permissions (revoked from `PUBLIC`, granted to authenticated users only);
-- **never trusting a caller-supplied `user_id`** — always derive identity from `auth.uid()`.
-
-#### 1. `claim_model_call(session_id, learner_turn_id)`
+#### 1. `claim_model_call(user_id, session_id, learner_turn_id)`
 
 Consumes quota **before** the provider is contacted. Verifies, all atomically:
 
@@ -342,7 +338,7 @@ Consumes quota **before** the provider is contacted. Verifies, all atomically:
 - the session is `in_progress`;
 - the learner turn belongs to this session and is eligible for evaluation;
 - `model_calls_used < MAX_MODEL_CALLS_PER_ATTEMPT`;
-- no evaluation is already in flight for this session/turn (prevents concurrent duplicate evaluation);
+- no evaluation is already in flight for the session (enforced by a partial unique index on live claims);
 
 then increments `model_calls_used`, marks the turn's evaluation as claimed/in-flight, and returns success.
 
@@ -407,6 +403,7 @@ A `TypedInputAdapter` produces the same normalized turn. The abstract interface 
 ### Supabase Clients (`lib/supabase/`)
 - `client.ts` — `createBrowserClient` for client components
 - `server.ts` — `createServerClient` for Server Components and route handlers, cookie adapter
+- `admin.ts` — server-only secret-key client for evaluator/quota RPCs; never imported into Client Components
 - `proxy.ts` (lib) — `updateSession()`: refreshes the auth token via `getClaims()` and passes refreshed claims to Server Components so they don't re-refresh
 
 Plus root `proxy.ts`:
