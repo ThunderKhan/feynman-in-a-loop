@@ -16,17 +16,21 @@ type AuthAction = (
 export function LoginForm({ action }: { action: AuthAction }) {
   const [state, formAction, pending] = useActionState(action, initialState);
   const [showPassword, setShowPassword] = useState(false);
+  const [artworkSrc, setArtworkSrc] = useState(
+    "/images/auth/feynman-ascii.png",
+  );
 
   return (
     <main className="min-h-dvh bg-[#f3f2ee] text-[#171717] lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(430px,0.92fr)]">
       <section className="relative hidden min-h-dvh overflow-hidden bg-black lg:block">
         <Image
-          src="/images/auth/feynman-ascii.svg"
+          src={artworkSrc}
           alt="ASCII-style artwork of Richard Feynman teaching at a chalkboard"
           fill
           priority
           sizes="55vw"
           className="object-cover object-center"
+          onError={() => setArtworkSrc("/images/auth/feynman-ascii.svg")}
         />
       </section>
 
