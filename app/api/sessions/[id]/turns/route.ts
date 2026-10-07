@@ -463,6 +463,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
         learnerTurnId,
         code: error.code,
         status: error.status ?? null,
+        note:
+          error.code === "structured_output_failure"
+            ? "Strict schema and the single JSON-mode retry both failed."
+            : null,
       });
       const status =
         error.code === "provider_not_configured"
