@@ -1,5 +1,5 @@
-import type { MasteryDimensions } from "../types";
-import type { EvidenceLedger } from "./types";
+import type { MasteryDimensions } from "../types.ts";
+import type { EvidenceLedger } from "./types.ts";
 
 const LABELS: Record<keyof MasteryDimensions, string> = {
   coreIdea: "Core idea",
