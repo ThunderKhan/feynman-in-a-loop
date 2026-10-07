@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  validateStudentBoundary,
   validateTurnOutput,
   TurnValidationError,
 } from "../../lib/ai/validate.ts";
@@ -112,19 +113,8 @@ test("a completing turn cannot ask another question", () => {
   output.evaluation.studentState = "understanding";
   output.student.message = "That follows. Any final thoughts?";
 
-  // Completion will fail meaning validation first because this fixture lacks
-  // correction/transfer evidence; validate the boundary directly.
   assert.throws(
-    () => {
-      const { shouldComplete } = output.evaluation;
-      assert.equal(shouldComplete, true);
-      if (output.student.message.includes("?")) {
-        throw new TurnValidationError(
-          "A completed attempt must not ask the learner another question.",
-          "boundary",
-        );
-      }
-    },
+    () => validateStudentBoundary(output),
     (error) =>
       error instanceof TurnValidationError && error.gate === "boundary",
   );
