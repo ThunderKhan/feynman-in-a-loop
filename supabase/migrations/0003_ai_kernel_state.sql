@@ -68,7 +68,7 @@ returns uuid
 language plpgsql
 security definer
 set search_path = ''
-as $
+as $$
 declare
   v_user uuid := auth.uid();
   v_session public.learning_sessions%rowtype;
@@ -149,7 +149,7 @@ begin
 
   return v_turn_id;
 end;
-$;
+$$;
 
 -- Remove the Slice 2 signature so PostgREST cannot retain an old overload.
 drop function if exists public.apply_turn_result(
