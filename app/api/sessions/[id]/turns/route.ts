@@ -17,6 +17,7 @@ import {
 import { TurnOutputSchema } from "@/lib/ai/schemas/turn";
 import { validateTransition, MachineTransitionError } from "@/lib/ai/machine";
 import { buildMasteryResult } from "@/lib/ai/result";
+import { derivePriorityRule } from "@/lib/ai/priority";
 import type { LearningSession } from "@/lib/types";
 import type {
   TurnInput,
@@ -354,8 +355,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     content: turn.content,
   }));
 
+  const priorityRule = derivePriorityRule({
+    topic: selected.topic,
+    currentStage: selected.currentStage,
+    learnerContent: parsedBody.data.content,
+  });
+
   const input: TurnInput = {
     ...selected,
+    priorityRule,
     learnerTurnId: learnerTurnId as string,
     learnerContent: parsedBody.data.content,
     mode: "normal",
@@ -367,6 +375,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     sessionId,
     contextTurns: selected.turns,
     existingLedger: selected.evidenceLedger,
+    priorityRule,
   };
 
   const claim = await claimTurn(user.id, sessionId, learnerTurnId as string);
